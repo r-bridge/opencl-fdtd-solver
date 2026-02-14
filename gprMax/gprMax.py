@@ -439,7 +439,7 @@ def run_mpi_sim(args, inputfile, usernamespace, optparams=None):
                 args.gpu = args.gpu[rank]
             # GPUs on multiple nodes where CUDA_VISIBLE_DEVICES is the same 
             # on each node
-            except: 
+            except IndexError: 
                 args.gpu = args.gpu[rank % len(args.gpu)]
                 
             gpuinfo = ' using {} - {}, {} RAM '.format(args.gpu.deviceID, 
