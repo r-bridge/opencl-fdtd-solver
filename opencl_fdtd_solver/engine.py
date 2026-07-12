@@ -119,14 +119,14 @@ class OpenCLFDTD:
         cl.enqueue_copy(self.queue, self.eps_buf, eps_flat)
 
     def _build_cpml(self):
-        """Calculate CPML coefficients and allocate auxiliary buffers on the GPU."""
+        """Calculate CPML coefficients and allocate face-local psi buffers on the GPU."""
         dl   = self.dl
         dt   = self.dt
         npml = self.npml
         Nx, Ny, Nz = self.Nx, self.Ny, self.Nz
 
         m          = 3
-        sigma_opt  = 0.8 * (m + 1) / (2.0 * ETA0 * dl * npml)
+        sigma_opt  = 0.8 * (m + 1) / (2.0 * ETA0 * dl * npml) if npml > 0 else 0.0
         alpha_max  = 0.05 / ETA0
 
         def _1d_coeffs(n):
@@ -152,7 +152,6 @@ class OpenCLFDTD:
         bz, cz, kz = _1d_coeffs(Nz)
 
         mf = cl.mem_flags
-        # Copy 1D CPML arrays to GPU
         self.bx_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=bx)
         self.cx_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=cx)
         self.kx_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=kx)
@@ -165,28 +164,92 @@ class OpenCLFDTD:
         self.cz_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=cz)
         self.kz_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=kz)
 
-        # Allocate CPML 3D correction (psi) arrays
-        zeros = np.zeros(self.size, dtype=self.dtype)
-        
-        self.psi_Hx_y_buf = cl.Buffer(self.ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=zeros)
-        self.psi_Hx_z_buf = cl.Buffer(self.ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=zeros)
-        self.psi_Hy_x_buf = cl.Buffer(self.ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=zeros)
-        self.psi_Hy_z_buf = cl.Buffer(self.ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=zeros)
-        self.psi_Hz_x_buf = cl.Buffer(self.ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=zeros)
-        self.psi_Hz_y_buf = cl.Buffer(self.ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=zeros)
+        # Face-local psi: only the PML slabs where the corresponding c-coeff is nonzero.
+        # x-normal faces: 2*npml * Ny * Nz  (Hy_x, Hz_x, Ey_x, Ez_x)
+        # y-normal faces: Nx * 2*npml * Nz  (Hx_y, Hz_y, Ex_y, Ez_y)
+        # z-normal faces: Nx * Ny * 2*npml  (Hx_z, Hy_z, Ex_z, Ey_z)
+        self.psi_x_size = (2 * npml * Ny * Nz) if npml > 0 else 0
+        self.psi_y_size = (Nx * 2 * npml * Nz) if npml > 0 else 0
+        self.psi_z_size = (Nx * Ny * 2 * npml) if npml > 0 else 0
 
-        self.psi_Ex_y_buf = cl.Buffer(self.ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=zeros)
-        self.psi_Ex_z_buf = cl.Buffer(self.ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=zeros)
-        self.psi_Ey_x_buf = cl.Buffer(self.ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=zeros)
-        self.psi_Ey_z_buf = cl.Buffer(self.ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=zeros)
-        self.psi_Ez_x_buf = cl.Buffer(self.ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=zeros)
-        self.psi_Ez_y_buf = cl.Buffer(self.ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=zeros)
+        def _psi_buf(n):
+            if n == 0:
+                # Tiny placeholder so kernel args remain valid if ever referenced.
+                return cl.Buffer(self.ctx, mf.READ_WRITE, 4)
+            zeros = np.zeros(n, dtype=self.dtype)
+            return cl.Buffer(self.ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=zeros)
+
+        self.psi_Hy_x_buf = _psi_buf(self.psi_x_size)
+        self.psi_Hz_x_buf = _psi_buf(self.psi_x_size)
+        self.psi_Ey_x_buf = _psi_buf(self.psi_x_size)
+        self.psi_Ez_x_buf = _psi_buf(self.psi_x_size)
+
+        self.psi_Hx_y_buf = _psi_buf(self.psi_y_size)
+        self.psi_Hz_y_buf = _psi_buf(self.psi_y_size)
+        self.psi_Ex_y_buf = _psi_buf(self.psi_y_size)
+        self.psi_Ez_y_buf = _psi_buf(self.psi_y_size)
+
+        self.psi_Hx_z_buf = _psi_buf(self.psi_z_size)
+        self.psi_Hy_z_buf = _psi_buf(self.psi_z_size)
+        self.psi_Ex_z_buf = _psi_buf(self.psi_z_size)
+        self.psi_Ey_z_buf = _psi_buf(self.psi_z_size)
+
+    @staticmethod
+    def estimate_device_memory_bytes(shape, npml, dtype=np.float32):
+        """Estimated GPU allocation for fields + face-local CPML psi (bytes)."""
+        nx, ny, nz = shape
+        item = np.dtype(dtype).itemsize
+        fields = 7 * nx * ny * nz * item  # Ex..Hz + eps
+        if npml <= 0:
+            return fields
+        psi = (
+            4 * (2 * npml * ny * nz)  # x-faces
+            + 4 * (nx * 2 * npml * nz)  # y-faces
+            + 4 * (nx * ny * 2 * npml)  # z-faces
+        ) * item
+        # 1D CPML coeff arrays are negligible
+        return fields + psi
 
     def _compile_kernels(self):
-        """Compile Yee-grid FDTD update kernels."""
+        """Compile Yee-grid FDTD update kernels (coalesced NDRange + interior/PML split)."""
+        # Work-item mapping: get_global_id(0)=k, (1)=j, (2)=i so adjacent threads
+        # touch contiguous addresses along the fastest array axis (k).
         kernel_src = """
-        __kernel void update_H(
+        __kernel void update_H_interior(
             int Nx, int Ny, int Nz,
+            int npml,
+            float dl, float dtm,
+            __global const float *Ex,
+            __global const float *Ey,
+            __global const float *Ez,
+            __global float *Hx,
+            __global float *Hy,
+            __global float *Hz
+        ) {
+            int k = get_global_id(0) + npml;
+            int j = get_global_id(1) + npml;
+            int i = get_global_id(2) + npml;
+
+            if (i >= Nx - npml || j >= Ny - npml || k >= Nz - npml) return;
+
+            int idx = i * Ny * Nz + j * Nz + k;
+            float inv_dl = 1.0f / dl;
+
+            float dEz_dy = Ez[idx + Nz] - Ez[idx];
+            float dEy_dz = Ey[idx + 1] - Ey[idx];
+            float dEx_dz = Ex[idx + 1] - Ex[idx];
+            float dEz_dx = Ez[idx + Ny * Nz] - Ez[idx];
+            float dEy_dx = Ey[idx + Ny * Nz] - Ey[idx];
+            float dEx_dy = Ex[idx + Nz] - Ex[idx];
+
+            Hx[idx] -= dtm * (dEz_dy - dEy_dz) * inv_dl;
+            Hy[idx] -= dtm * (dEx_dz - dEz_dx) * inv_dl;
+            Hz[idx] -= dtm * (dEy_dx - dEx_dy) * inv_dl;
+        }
+
+        __kernel void update_H_pml(
+            int Nx, int Ny, int Nz,
+            int npml,
             float dl, float dtm,
             __global const float *Ex,
             __global const float *Ey,
@@ -201,15 +264,21 @@ class OpenCLFDTD:
             __global float *psi_Hy_x, __global float *psi_Hy_z,
             __global float *psi_Hz_x, __global float *psi_Hz_y
         ) {
-            int i = get_global_id(0);
+            int k = get_global_id(0);
             int j = get_global_id(1);
-            int k = get_global_id(2);
+            int i = get_global_id(2);
 
             if (i >= Nx || j >= Ny || k >= Nz) return;
 
+            if (npml > 0 &&
+                i >= npml && i < Nx - npml &&
+                j >= npml && j < Ny - npml &&
+                k >= npml && k < Nz - npml) {
+                return;
+            }
+
             int idx = i * Ny * Nz + j * Nz + k;
 
-            // Forward differences with boundary conditions (matching _fwd axis zero padding)
             float dEz_dy = (j < Ny - 1) ? (Ez[idx + Nz] - Ez[idx]) : 0.0f;
             float dEy_dz = (k < Nz - 1) ? (Ey[idx + 1] - Ey[idx])  : 0.0f;
             float dEx_dz = (k < Nz - 1) ? (Ex[idx + 1] - Ex[idx])  : 0.0f;
@@ -217,29 +286,82 @@ class OpenCLFDTD:
             float dEy_dx = (i < Nx - 1) ? (Ey[idx + Ny * Nz] - Ey[idx]) : 0.0f;
             float dEx_dy = (j < Ny - 1) ? (Ex[idx + Nz] - Ex[idx]) : 0.0f;
 
-            // CPML psi updates
-            float p_Hx_y = by[j] * psi_Hx_y[idx] + cy[j] * dEz_dy;
-            float p_Hx_z = bz[k] * psi_Hx_z[idx] + cz[k] * dEy_dz;
-            float p_Hy_x = bx[i] * psi_Hy_x[idx] + cx[i] * dEz_dx;
-            float p_Hy_z = bz[k] * psi_Hy_z[idx] + cz[k] * dEx_dz;
-            float p_Hz_x = bx[i] * psi_Hz_x[idx] + cx[i] * dEy_dx;
-            float p_Hz_y = by[j] * psi_Hz_y[idx] + cy[j] * dEx_dy;
+            int in_x = (i < npml) || (i >= Nx - npml);
+            int in_y = (j < npml) || (j >= Ny - npml);
+            int in_z = (k < npml) || (k >= Nz - npml);
 
-            psi_Hx_y[idx] = p_Hx_y;
-            psi_Hx_z[idx] = p_Hx_z;
-            psi_Hy_x[idx] = p_Hy_x;
-            psi_Hy_z[idx] = p_Hy_z;
-            psi_Hz_x[idx] = p_Hz_x;
-            psi_Hz_y[idx] = p_Hz_y;
+            float p_Hx_y = 0.0f, p_Hx_z = 0.0f;
+            float p_Hy_x = 0.0f, p_Hy_z = 0.0f;
+            float p_Hz_x = 0.0f, p_Hz_y = 0.0f;
 
-            // Field update
+            if (in_x) {
+                int il = (i < npml) ? i : (npml + i - (Nx - npml));
+                int xi = il * Ny * Nz + j * Nz + k;
+                p_Hy_x = bx[i] * psi_Hy_x[xi] + cx[i] * dEz_dx;
+                p_Hz_x = bx[i] * psi_Hz_x[xi] + cx[i] * dEy_dx;
+                psi_Hy_x[xi] = p_Hy_x;
+                psi_Hz_x[xi] = p_Hz_x;
+            }
+            if (in_y) {
+                int jl = (j < npml) ? j : (npml + j - (Ny - npml));
+                int yi = i * (2 * npml) * Nz + jl * Nz + k;
+                p_Hx_y = by[j] * psi_Hx_y[yi] + cy[j] * dEz_dy;
+                p_Hz_y = by[j] * psi_Hz_y[yi] + cy[j] * dEx_dy;
+                psi_Hx_y[yi] = p_Hx_y;
+                psi_Hz_y[yi] = p_Hz_y;
+            }
+            if (in_z) {
+                int kl = (k < npml) ? k : (npml + k - (Nz - npml));
+                int zi = i * Ny * (2 * npml) + j * (2 * npml) + kl;
+                p_Hx_z = bz[k] * psi_Hx_z[zi] + cz[k] * dEy_dz;
+                p_Hy_z = bz[k] * psi_Hy_z[zi] + cz[k] * dEx_dz;
+                psi_Hx_z[zi] = p_Hx_z;
+                psi_Hy_z[zi] = p_Hy_z;
+            }
+
             Hx[idx] -= dtm * (dEz_dy / (ky[j] * dl) + p_Hx_y - dEy_dz / (kz[k] * dl) - p_Hx_z);
             Hy[idx] -= dtm * (dEx_dz / (kz[k] * dl) + p_Hy_z - dEz_dx / (kx[i] * dl) - p_Hy_x);
             Hz[idx] -= dtm * (dEy_dx / (kx[i] * dl) + p_Hz_x - dEx_dy / (ky[j] * dl) - p_Hz_y);
         }
 
-        __kernel void update_E(
+        __kernel void update_E_interior(
             int Nx, int Ny, int Nz,
+            int npml,
+            float dl, float dt,
+            float eps0,
+            __global const float *eps_r,
+            __global const float *Hx,
+            __global const float *Hy,
+            __global const float *Hz,
+            __global float *Ex,
+            __global float *Ey,
+            __global float *Ez
+        ) {
+            int k = get_global_id(0) + npml;
+            int j = get_global_id(1) + npml;
+            int i = get_global_id(2) + npml;
+
+            if (i >= Nx - npml || j >= Ny - npml || k >= Nz - npml) return;
+
+            int idx = i * Ny * Nz + j * Nz + k;
+            float inv_dl = 1.0f / dl;
+
+            float dHz_dy = Hz[idx] - Hz[idx - Nz];
+            float dHy_dz = Hy[idx] - Hy[idx - 1];
+            float dHx_dz = Hx[idx] - Hx[idx - 1];
+            float dHz_dx = Hz[idx] - Hz[idx - Ny * Nz];
+            float dHy_dx = Hy[idx] - Hy[idx - Ny * Nz];
+            float dHx_dy = Hx[idx] - Hx[idx - Nz];
+
+            float coeff = dt / (eps0 * eps_r[idx]) * inv_dl;
+            Ex[idx] += coeff * (dHz_dy - dHy_dz);
+            Ey[idx] += coeff * (dHx_dz - dHz_dx);
+            Ez[idx] += coeff * (dHy_dx - dHx_dy);
+        }
+
+        __kernel void update_E_pml(
+            int Nx, int Ny, int Nz,
+            int npml,
             float dl, float dt,
             float eps0,
             __global const float *eps_r,
@@ -256,15 +378,21 @@ class OpenCLFDTD:
             __global float *psi_Ey_x, __global float *psi_Ey_z,
             __global float *psi_Ez_x, __global float *psi_Ez_y
         ) {
-            int i = get_global_id(0);
+            int k = get_global_id(0);
             int j = get_global_id(1);
-            int k = get_global_id(2);
+            int i = get_global_id(2);
 
             if (i >= Nx || j >= Ny || k >= Nz) return;
 
+            if (npml > 0 &&
+                i >= npml && i < Nx - npml &&
+                j >= npml && j < Ny - npml &&
+                k >= npml && k < Nz - npml) {
+                return;
+            }
+
             int idx = i * Ny * Nz + j * Nz + k;
 
-            // Backward differences with boundary conditions (matching _bwd axis zero padding)
             float dHz_dy = (j > 0) ? (Hz[idx] - Hz[idx - Nz]) : 0.0f;
             float dHy_dz = (k > 0) ? (Hy[idx] - Hy[idx - 1])  : 0.0f;
             float dHx_dz = (k > 0) ? (Hx[idx] - Hx[idx - 1])  : 0.0f;
@@ -272,22 +400,39 @@ class OpenCLFDTD:
             float dHy_dx = (i > 0) ? (Hy[idx] - Hy[idx - Ny * Nz]) : 0.0f;
             float dHx_dy = (j > 0) ? (Hx[idx] - Hx[idx - Nz]) : 0.0f;
 
-            // CPML psi updates
-            float p_Ex_y = by[j] * psi_Ex_y[idx] + cy[j] * dHz_dy;
-            float p_Ex_z = bz[k] * psi_Ex_z[idx] + cz[k] * dHy_dz;
-            float p_Ey_x = bx[i] * psi_Ey_x[idx] + cx[i] * dHz_dx;
-            float p_Ey_z = bz[k] * psi_Ey_z[idx] + cz[k] * dHx_dz;
-            float p_Ez_x = bx[i] * psi_Ez_x[idx] + cx[i] * dHy_dx;
-            float p_Ez_y = by[j] * psi_Ez_y[idx] + cy[j] * dHx_dy;
+            int in_x = (i < npml) || (i >= Nx - npml);
+            int in_y = (j < npml) || (j >= Ny - npml);
+            int in_z = (k < npml) || (k >= Nz - npml);
 
-            psi_Ex_y[idx] = p_Ex_y;
-            psi_Ex_z[idx] = p_Ex_z;
-            psi_Ey_x[idx] = p_Ey_x;
-            psi_Ey_z[idx] = p_Ey_z;
-            psi_Ez_x[idx] = p_Ez_x;
-            psi_Ez_y[idx] = p_Ez_y;
+            float p_Ex_y = 0.0f, p_Ex_z = 0.0f;
+            float p_Ey_x = 0.0f, p_Ey_z = 0.0f;
+            float p_Ez_x = 0.0f, p_Ez_y = 0.0f;
 
-            // Field update
+            if (in_x) {
+                int il = (i < npml) ? i : (npml + i - (Nx - npml));
+                int xi = il * Ny * Nz + j * Nz + k;
+                p_Ey_x = bx[i] * psi_Ey_x[xi] + cx[i] * dHz_dx;
+                p_Ez_x = bx[i] * psi_Ez_x[xi] + cx[i] * dHy_dx;
+                psi_Ey_x[xi] = p_Ey_x;
+                psi_Ez_x[xi] = p_Ez_x;
+            }
+            if (in_y) {
+                int jl = (j < npml) ? j : (npml + j - (Ny - npml));
+                int yi = i * (2 * npml) * Nz + jl * Nz + k;
+                p_Ex_y = by[j] * psi_Ex_y[yi] + cy[j] * dHz_dy;
+                p_Ez_y = by[j] * psi_Ez_y[yi] + cy[j] * dHx_dy;
+                psi_Ex_y[yi] = p_Ex_y;
+                psi_Ez_y[yi] = p_Ez_y;
+            }
+            if (in_z) {
+                int kl = (k < npml) ? k : (npml + k - (Nz - npml));
+                int zi = i * Ny * (2 * npml) + j * (2 * npml) + kl;
+                p_Ex_z = bz[k] * psi_Ex_z[zi] + cz[k] * dHy_dz;
+                p_Ey_z = bz[k] * psi_Ey_z[zi] + cz[k] * dHx_dz;
+                psi_Ex_z[zi] = p_Ex_z;
+                psi_Ey_z[zi] = p_Ey_z;
+            }
+
             float coeff = dt / (eps0 * eps_r[idx]);
             Ex[idx] += coeff * (dHz_dy / (ky[j] * dl) + p_Ex_y - dHy_dz / (kz[k] * dl) - p_Ex_z);
             Ey[idx] += coeff * (dHx_dz / (kz[k] * dl) + p_Ey_z - dHz_dx / (kx[i] * dl) - p_Ey_x);
@@ -299,8 +444,8 @@ class OpenCLFDTD:
             int z_src, float amp,
             __global float *Ex
         ) {
-            int i = get_global_id(0);
-            int j = get_global_id(1);
+            int j = get_global_id(0);
+            int i = get_global_id(1);
 
             if (i >= Nx || j >= Ny) return;
 
@@ -317,9 +462,9 @@ class OpenCLFDTD:
             __global const float *field,
             __global float2 *field_dft
         ) {
-            int i = get_global_id(0);
+            int k = get_global_id(0);
             int j = get_global_id(1);
-            int k = get_global_id(2);
+            int i = get_global_id(2);
 
             int x_dim = ix1 - ix0 + 1;
             int y_dim = iy1 - iy0 + 1;
@@ -331,12 +476,10 @@ class OpenCLFDTD:
             int abs_j = iy0 + j;
             int abs_k = iz0 + k;
 
-            // Only update if it is on one of the 6 box faces
             if (abs_i == ix0 || abs_i == ix1 || abs_j == iy0 || abs_j == iy1 || abs_k == iz0 || abs_k == iz1) {
                 int idx = abs_i * Ny * Nz + abs_j * Nz + abs_k;
                 float val = field[idx];
 
-                // DFT complex accumulation
                 float2 current_dft = field_dft[idx];
                 current_dft.x += val * phase_real;
                 current_dft.y += val * phase_imag;
@@ -345,16 +488,26 @@ class OpenCLFDTD:
         }
         """
         self.program = cl.Program(self.ctx, kernel_src).build()
-        self.kern_update_H = cl.Kernel(self.program, "update_H")
-        self.kern_update_E = cl.Kernel(self.program, "update_E")
+        self.kern_update_H_interior = cl.Kernel(self.program, "update_H_interior")
+        self.kern_update_H_pml = cl.Kernel(self.program, "update_H_pml")
+        self.kern_update_E_interior = cl.Kernel(self.program, "update_E_interior")
+        self.kern_update_E_pml = cl.Kernel(self.program, "update_E_pml")
         self.kern_add_source_Ex = cl.Kernel(self.program, "add_source_Ex")
         self.kern_accumulate_dft = cl.Kernel(self.program, "accumulate_dft")
+
+        # Cached launch geometries (coalesced: Nz, Ny, Nx).
+        self._gs_full = (self.Nz, self.Ny, self.Nx)
+        n = self.npml
+        nx_i = self.Nx - 2 * n
+        ny_i = self.Ny - 2 * n
+        nz_i = self.Nz - 2 * n
+        self._gs_interior = (nz_i, ny_i, nx_i) if (nx_i > 0 and ny_i > 0 and nz_i > 0) else None
 
     def add_source_Ex(self, z_src, amp):
         """Adds a sheet source value directly on the GPU using a kernel."""
         self.kern_add_source_Ex(
             self.queue,
-            (self.Nx, self.Ny),
+            (self.Ny, self.Nx),
             None,
             np.int32(self.Nx), np.int32(self.Ny), np.int32(self.Nz),
             np.int32(z_src), np.float32(amp),
@@ -363,40 +516,80 @@ class OpenCLFDTD:
 
     def _update_H(self):
         dtm = self.dt / MU0
-        self.kern_update_H(
-            self.queue,
-            (self.Nx, self.Ny, self.Nz),
-            None,
-            np.int32(self.Nx), np.int32(self.Ny), np.int32(self.Nz),
-            np.float32(self.dl), np.float32(dtm),
-            self.Ex_buf, self.Ey_buf, self.Ez_buf,
-            self.Hx_buf, self.Hy_buf, self.Hz_buf,
-            self.bx_buf, self.cx_buf, self.kx_buf,
-            self.by_buf, self.cy_buf, self.ky_buf,
-            self.bz_buf, self.cz_buf, self.kz_buf,
-            self.psi_Hx_y_buf, self.psi_Hx_z_buf,
-            self.psi_Hy_x_buf, self.psi_Hy_z_buf,
-            self.psi_Hz_x_buf, self.psi_Hz_y_buf
-        )
+        nx, ny, nz = np.int32(self.Nx), np.int32(self.Ny), np.int32(self.Nz)
+        npml = np.int32(self.npml)
+        dl = np.float32(self.dl)
+        dtm_f = np.float32(dtm)
+
+        if self._gs_interior is not None:
+            self.kern_update_H_interior(
+                self.queue, self._gs_interior, None,
+                nx, ny, nz, npml, dl, dtm_f,
+                self.Ex_buf, self.Ey_buf, self.Ez_buf,
+                self.Hx_buf, self.Hy_buf, self.Hz_buf,
+            )
+
+        if self.npml > 0:
+            self.kern_update_H_pml(
+                self.queue, self._gs_full, None,
+                nx, ny, nz, npml, dl, dtm_f,
+                self.Ex_buf, self.Ey_buf, self.Ez_buf,
+                self.Hx_buf, self.Hy_buf, self.Hz_buf,
+                self.bx_buf, self.cx_buf, self.kx_buf,
+                self.by_buf, self.cy_buf, self.ky_buf,
+                self.bz_buf, self.cz_buf, self.kz_buf,
+                self.psi_Hx_y_buf, self.psi_Hx_z_buf,
+                self.psi_Hy_x_buf, self.psi_Hy_z_buf,
+                self.psi_Hz_x_buf, self.psi_Hz_y_buf,
+            )
+        elif self._gs_interior is None:
+            # npml == 0 and no interior box: update whole domain with PML kernel path disabled.
+            # Fall through should not happen for valid grids; treat as full interior.
+            self.kern_update_H_interior(
+                self.queue, self._gs_full, None,
+                nx, ny, nz, np.int32(0), dl, dtm_f,
+                self.Ex_buf, self.Ey_buf, self.Ez_buf,
+                self.Hx_buf, self.Hy_buf, self.Hz_buf,
+            )
 
     def _update_E(self):
-        self.kern_update_E(
-            self.queue,
-            (self.Nx, self.Ny, self.Nz),
-            None,
-            np.int32(self.Nx), np.int32(self.Ny), np.int32(self.Nz),
-            np.float32(self.dl), np.float32(self.dt),
-            np.float32(EPS0),
-            self.eps_buf,
-            self.Hx_buf, self.Hy_buf, self.Hz_buf,
-            self.Ex_buf, self.Ey_buf, self.Ez_buf,
-            self.bx_buf, self.cx_buf, self.kx_buf,
-            self.by_buf, self.cy_buf, self.ky_buf,
-            self.bz_buf, self.cz_buf, self.kz_buf,
-            self.psi_Ex_y_buf, self.psi_Ex_z_buf,
-            self.psi_Ey_x_buf, self.psi_Ey_z_buf,
-            self.psi_Ez_x_buf, self.psi_Ez_y_buf
-        )
+        nx, ny, nz = np.int32(self.Nx), np.int32(self.Ny), np.int32(self.Nz)
+        npml = np.int32(self.npml)
+        dl = np.float32(self.dl)
+        dt = np.float32(self.dt)
+        eps0 = np.float32(EPS0)
+
+        if self._gs_interior is not None:
+            self.kern_update_E_interior(
+                self.queue, self._gs_interior, None,
+                nx, ny, nz, npml, dl, dt, eps0,
+                self.eps_buf,
+                self.Hx_buf, self.Hy_buf, self.Hz_buf,
+                self.Ex_buf, self.Ey_buf, self.Ez_buf,
+            )
+
+        if self.npml > 0:
+            self.kern_update_E_pml(
+                self.queue, self._gs_full, None,
+                nx, ny, nz, npml, dl, dt, eps0,
+                self.eps_buf,
+                self.Hx_buf, self.Hy_buf, self.Hz_buf,
+                self.Ex_buf, self.Ey_buf, self.Ez_buf,
+                self.bx_buf, self.cx_buf, self.kx_buf,
+                self.by_buf, self.cy_buf, self.ky_buf,
+                self.bz_buf, self.cz_buf, self.kz_buf,
+                self.psi_Ex_y_buf, self.psi_Ex_z_buf,
+                self.psi_Ey_x_buf, self.psi_Ey_z_buf,
+                self.psi_Ez_x_buf, self.psi_Ez_y_buf,
+            )
+        elif self._gs_interior is None:
+            self.kern_update_E_interior(
+                self.queue, self._gs_full, None,
+                nx, ny, nz, np.int32(0), dl, dt, eps0,
+                self.eps_buf,
+                self.Hx_buf, self.Hy_buf, self.Hz_buf,
+                self.Ex_buf, self.Ey_buf, self.Ez_buf,
+            )
 
     def step(self):
         """Single timestep Yee-update with sources and monitors."""

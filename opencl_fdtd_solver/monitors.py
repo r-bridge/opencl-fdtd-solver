@@ -249,7 +249,7 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         def _accumulate(field_buf, dft_buf):
             fdtd.kern_accumulate_dft(
                 fdtd.queue,
-                (x_dim, y_dim, z_dim),
+                (z_dim, y_dim, x_dim),
                 None,
                 np.int32(fdtd.Nx), np.int32(fdtd.Ny), np.int32(fdtd.Nz),
                 np.int32(self.ix0), np.int32(self.ix1),
