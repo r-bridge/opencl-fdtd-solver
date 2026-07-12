@@ -18,9 +18,8 @@
 
 """Comparative OpenCL-GPU vs MEEP-CPU benchmark near GPU VRAM capacity.
 
-Default grid is 560^3 (~176M Yee cells, ~12.4 GB of float32 field/CPML
-buffers), sized to sit near the limit of a 16 GB GPU without spilling into
-host memory (which collapses MCUPS).
+Default grid is 750^3 (~422M Yee cells, ~12.3 GB with face-local CPML psi),
+sized to sit near the limit of a 16 GB GPU without host-memory spill.
 """
 
 import os
@@ -32,23 +31,21 @@ import shutil
 import numpy as np
 from opencl_fdtd_solver import OpenCLFDTD
 
-# 19 float32 volumes: Ex/Ey/Ez/Hx/Hy/Hz/eps + 12 CPML psi arrays
-BYTES_PER_CELL = 19 * 4
-
 # Near-limit default for a 16 GB discrete GPU (validated on RTX 5080 16 GB).
-DEFAULT_SHAPE = (560, 560, 560)
+DEFAULT_SHAPE = (750, 750, 750)
 DEFAULT_STEPS = 200
+DEFAULT_NPML = 25
 
 
-def estimate_gpu_memory_gb(shape):
-    return (shape[0] * shape[1] * shape[2] * BYTES_PER_CELL) / (1024 ** 3)
+def estimate_gpu_memory_gb(shape, npml=DEFAULT_NPML):
+    return OpenCLFDTD.estimate_device_memory_bytes(shape, npml) / (1024 ** 3)
 
 
 def run_opencl_benchmark(shape=DEFAULT_SHAPE, steps=DEFAULT_STEPS):
     """Runs the OpenCL solver on the first available GPU device."""
     print(f"Starting OpenCL FDTD Simulation ({shape[0]}x{shape[1]}x{shape[2]} grid)...")
     dl = 1e-3  # 1 mm
-    npml = 25
+    npml = DEFAULT_NPML
     freq = 6e9  # 6 GHz
     fwidth = 0.2 * freq
 
@@ -65,10 +62,10 @@ def run_opencl_benchmark(shape=DEFAULT_SHAPE, steps=DEFAULT_STEPS):
             "Set PYOPENCL_CTX to an NVIDIA/AMD GPU platform before benchmarking."
         )
 
-    mem_gb = estimate_gpu_memory_gb(shape)
+    mem_gb = estimate_gpu_memory_gb(shape, npml)
     print(f"Device:  {fdtd.device.name}")
     print(f"VRAM:    {fdtd.device.global_mem_size / (1024 ** 3):.2f} GB reported")
-    print(f"Model:   ~{mem_gb:.2f} GB of float32 field/CPML buffers")
+    print(f"Model:   ~{mem_gb:.2f} GB of float32 field + face-local CPML buffers")
 
     z_src = shape[2] - npml - 2
     t0 = 5.0 / (np.pi * fwidth)
@@ -92,7 +89,7 @@ def run_opencl_benchmark(shape=DEFAULT_SHAPE, steps=DEFAULT_STEPS):
     return duration, mcups, fdtd.device.name, mem_gb
 
 
-def generate_meep_bench_script(shape=DEFAULT_SHAPE, steps=DEFAULT_STEPS, npml=25):
+def generate_meep_bench_script(shape=DEFAULT_SHAPE, steps=DEFAULT_STEPS, npml=DEFAULT_NPML):
     """Generates a MEEP script matched to the OpenCL benchmark geometry."""
     nx, ny, nz = shape
     # Match OpenCL Courant dt = 0.99 * dl / (c * sqrt(3)) in Meep units (c=1).

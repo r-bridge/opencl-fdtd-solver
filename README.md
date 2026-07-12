@@ -81,8 +81,10 @@ Results (AMD Ryzen 9 7945HX CPU, POCL OpenCL CPU fallback):
 *   **OpenCL (CPU Fallback):** `1.5550s` (`32.15 MCUPS`)
 *   **Speedup:** `1.54×` using OpenCL on CPU
 
-### Benchmark 2: MEEP CPU vs OpenCL GPU (175.6M Cells, ~12.4 GB)
-Compares MEEP (CPU, Docker) against this solver on an NVIDIA GPU. The default model is **560×560×560** Yee cells for **200 steps** (~175.6M cells, ~12.4 GB of float32 field + CPML buffers) — sized near a **16 GB** GPU limit without host-memory spill (which collapses MCUPS). The script aborts if OpenCL selects a CPU device.
+### Benchmark 2: MEEP CPU vs OpenCL GPU (421.9M Cells, ~12.3 GB)
+Compares MEEP (CPU, Docker) against this solver on an NVIDIA GPU. The default model is **750×750×750** Yee cells for **200 steps** (~421.9M cells, ~12.3 GB of float32 fields + face-local CPML ψ buffers) — sized near a **16 GB** GPU limit without host-memory spill. The script aborts if OpenCL selects a CPU device.
+
+Kernels use a coalesced `(k,j,i)` NDRange, a psi-free interior update, and face-local CPML storage (only the PML slabs allocate ψ).
 
 ```bash
 PYOPENCL_CTX=0 python -u benchmarks/benchmark_vs_meep.py
@@ -90,9 +92,9 @@ PYOPENCL_CTX=0 python -u benchmarks/benchmark_vs_meep.py
 
 | | Time | Throughput |
 |---|---:|---:|
-| **MEEP CPU** (`local-pymeep` Docker) | `536.74s` | `65.44 MCUPS` |
-| **OpenCL FDTD GPU** (RTX 5080 16 GB) | `311.36s` | `112.81 MCUPS` |
-| **Speedup** | | **`1.72×`** (OpenCL GPU faster) |
+| **MEEP CPU** (`local-pymeep` Docker) | `1439.29s` | `58.62 MCUPS` |
+| **OpenCL FDTD GPU** (RTX 5080 16 GB) | `9.17s` | `9199.02 MCUPS` |
+| **Speedup** | | **`156.9×`** (OpenCL GPU faster) |
 
 Hardware: NVIDIA GeForce RTX 5080 (15.92 GB reported), AMD Ryzen 9 7945HX host.
 
