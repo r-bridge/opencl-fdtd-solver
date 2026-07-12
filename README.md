@@ -14,18 +14,28 @@ The mathematical formulations for the Yee-grid field updates and the Convolution
 
 ## 2. Features
 *   **OpenCL Acceleration:** Runs field updates and DFT accumulations 100% on the GPU/accelerator using customized OpenCL kernels.
-*   **pluggable Monitors:** Supports host-side NumPy monitors and GPU-side OpenCL monitors for zero-copy DFT accumulation.
+*   **Pluggable Monitors:** Supports host-side NumPy monitors and GPU-side OpenCL monitors for zero-copy DFT accumulation.
 *   **NumPy Fallback:** Includes a pure NumPy CPU reference implementation (`NumPyFDTD`) for testing, fallback, and benchmarking.
 *   **Dependency-Free:** Pure Python package with minimal requirements (no C compiler or toolchains required at install time).
 
 ---
 
 ## 3. Installation
-Ensure you have an OpenCL platform (like POCL, NVIDIA CUDA, Intel, or AMD OpenCL SDK) installed, then:
+Ensure you have an OpenCL platform (NVIDIA CUDA, AMD, Intel, or POCL) installed, then:
 
 ```bash
 pip install numpy pyopencl h5py scipy matplotlib
 pip install -e .
+```
+
+For GPU runs, point PyOpenCL at your GPU platform (often `0` for NVIDIA CUDA):
+
+```bash
+# Linux / macOS
+export PYOPENCL_CTX=0
+
+# Windows PowerShell
+$env:PYOPENCL_CTX='0'
 ```
 
 ---
@@ -54,42 +64,35 @@ When executed, the script yields a perfect match under the correct physical mode
 *   **MEEP Reference (Docker):** `-224.9150 dB`
 *   **Calibrated Difference:** **`0.0000 dB`** (perfect numerical agreement)
 
-
 ---
 
 ## 6. Performance Benchmarks
-We run two performance benchmarks: a local comparison against the NumPy reference engine, and a comparative benchmark against MEEP.
+Two benchmarks are provided: a small NumPy vs OpenCL check, and a large MEEP vs OpenCL GPU run sized near **16 GB** VRAM.
 
 ### Benchmark 1: NumPy CPU Reference vs OpenCL (1.0M Cells)
-Measures performance on a grid of **1.0M Yee cells** (`100x100x100`) for 50 steps:
+Measures performance on a grid of **1.0M Yee cells** (`100×100×100`) for 50 steps:
 
 ```bash
 PYOPENCL_CTX=0 python benchmarks/benchmark.py
 ```
 
 Results (AMD Ryzen 9 7945HX CPU, POCL OpenCL CPU fallback):
-*   **NumPy CPU:** 2.4012s (20.82 MCUPS)
-*   **OpenCL (CPU Fallback):** 1.5550s (32.15 MCUPS)
-*   **Speedup:** **1.54x faster** using OpenCL on CPU.
+*   **NumPy CPU:** `2.4012s` (`20.82 MCUPS`)
+*   **OpenCL (CPU Fallback):** `1.5550s` (`32.15 MCUPS`)
+*   **Speedup:** `1.54×` using OpenCL on CPU
 
-### Benchmark 2: MEEP vs OpenCL FDTD (8.0M Cells)
-To compare performance on a larger, more realistic simulation scale, we run both our OpenCL solver and MEEP on an **8.0M Yee cell grid** (`200x200x200`) for **500 steps**:
+### Benchmark 2: MEEP CPU vs OpenCL GPU (175.6M Cells, ~12.4 GB)
+Compares MEEP (CPU, Docker) against this solver on an NVIDIA GPU. The default model is **560×560×560** Yee cells for **200 steps** (~175.6M cells, ~12.4 GB of float32 field + CPML buffers) — sized near a **16 GB** GPU limit without host-memory spill (which collapses MCUPS). The script aborts if OpenCL selects a CPU device.
 
 ```bash
-PYOPENCL_CTX=0 python benchmarks/benchmark_vs_meep.py
+PYOPENCL_CTX=0 python -u benchmarks/benchmark_vs_meep.py
 ```
 
-Results (AMD Ryzen 9 7945HX CPU, 32 threads, POCL OpenCL CPU fallback):
-*   **MEEP CPU (Docker, native multi-threaded C++):** `71.68s` (**`55.80 MCUPS`**)
-*   **OpenCL FDTD (CPU Fallback):** `199.40s` (**`20.06 MCUPS`**)
-*   **Performance Ratio:** `0.36x` (MEEP is `2.78x` faster on CPU fallback)
+| | Time | Throughput |
+|---|---:|---:|
+| **MEEP CPU** (`local-pymeep` Docker) | `536.74s` | `65.44 MCUPS` |
+| **OpenCL FDTD GPU** (RTX 5080 16 GB) | `311.36s` | `112.81 MCUPS` |
+| **Speedup** | | **`1.72×`** (OpenCL GPU faster) |
 
-### Performance Takeaway: Why GPU Acceleration is Worth the Hustle
-While MEEP's hand-tuned C++ multi-threaded engine is `2.78x` faster than the generic OpenCL CPU fallback driver, the primary goal of the OpenCL FDTD solver is to run on **discrete GPUs**. 
-
-FDTD is a highly parallel, memory-bandwidth-bound algorithm. Modern CPUs are limited to `50-80 GB/s` memory bandwidth, whereas modern GPUs have `300 GB/s` to over `2 TB/s` bandwidth.
-
-On a discrete GPU (typically running at `300` to `1000+ MCUPS`):
-*   At `500 MCUPS`, this 8.0M cell simulation will finish in **`8.0 seconds`** (a **`9x` speedup** over MEEP CPU).
-*   For high-resolution swept runs (resolution=2 or 4) which take hours on MEEP CPU, the GPU acceleration reduces the entire sweep to a few minutes, making it highly worth the hustle!
+Hardware: NVIDIA GeForce RTX 5080 (15.92 GB reported), AMD Ryzen 9 7945HX host.
 
