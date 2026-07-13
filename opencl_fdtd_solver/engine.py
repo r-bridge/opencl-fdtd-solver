@@ -752,17 +752,12 @@ class OpenCLFDTD:
             float2 Lvec[3] = { NL_in[6 * p + 3], NL_in[6 * p + 4], NL_in[6 * p + 5] };
 
             float ang = k_wave * r;
-            float2 eikr = (float2)(cos(ang), sin(ang));
+            // Outgoing wave ~ e^{-j k r}
+            float2 eikr = (float2)(cos(ang), -sin(ang));
             float scale = k_wave / (4.0f * 3.14159265358979323846f * r);
             float2 pref = cmul((float2)(0.0f, -scale), eikr);
 
-            float2 rxN[3], rxL[3], Nt[3], Lt[3], E[3], H[3];
-            rxN[0] = (float2)(rhat[1] * Nvec[2].x - rhat[2] * Nvec[1].x,
-                              rhat[1] * Nvec[2].y - rhat[2] * Nvec[1].y);
-            rxN[1] = (float2)(rhat[2] * Nvec[0].x - rhat[0] * Nvec[2].x,
-                              rhat[2] * Nvec[0].y - rhat[0] * Nvec[2].y);
-            rxN[2] = (float2)(rhat[0] * Nvec[1].x - rhat[1] * Nvec[0].x,
-                              rhat[0] * Nvec[1].y - rhat[1] * Nvec[0].y);
+            float2 rxL[3], Nt[3], E[3], H[3];
             rxL[0] = (float2)(rhat[1] * Lvec[2].x - rhat[2] * Lvec[1].x,
                               rhat[1] * Lvec[2].y - rhat[2] * Lvec[1].y);
             rxL[1] = (float2)(rhat[2] * Lvec[0].x - rhat[0] * Lvec[2].x,
@@ -773,18 +768,19 @@ class OpenCLFDTD:
             float2 Ndot = (float2)(
                 rhat[0] * Nvec[0].x + rhat[1] * Nvec[1].x + rhat[2] * Nvec[2].x,
                 rhat[0] * Nvec[0].y + rhat[1] * Nvec[1].y + rhat[2] * Nvec[2].y);
-            float2 Ldot = (float2)(
-                rhat[0] * Lvec[0].x + rhat[1] * Lvec[1].x + rhat[2] * Lvec[2].x,
-                rhat[0] * Lvec[0].y + rhat[1] * Lvec[1].y + rhat[2] * Lvec[2].y);
 
             for (int c = 0; c < 3; c++) {
                 Nt[c] = (float2)(Nvec[c].x - Ndot.x * rhat[c], Nvec[c].y - Ndot.y * rhat[c]);
-                Lt[c] = (float2)(Lvec[c].x - Ldot.x * rhat[c], Lvec[c].y - Ldot.y * rhat[c]);
-                float2 tE = (float2)(Lt[c].x + eta0 * rxN[c].x, Lt[c].y + eta0 * rxN[c].y);
-                float2 tH = (float2)(Nt[c].x - rxL[c].x / eta0, Nt[c].y - rxL[c].y / eta0);
+                float2 tE = (float2)(eta0 * Nt[c].x + rxL[c].x, eta0 * Nt[c].y + rxL[c].y);
                 E[c] = cmul(pref, tE);
-                H[c] = cmul(pref, tH);
             }
+            // Far-field TEM: H = -r̂ × E / η
+            H[0] = (float2)(-(rhat[1] * E[2].x - rhat[2] * E[1].x) / eta0,
+                            -(rhat[1] * E[2].y - rhat[2] * E[1].y) / eta0);
+            H[1] = (float2)(-(rhat[2] * E[0].x - rhat[0] * E[2].x) / eta0,
+                            -(rhat[2] * E[0].y - rhat[0] * E[2].y) / eta0);
+            H[2] = (float2)(-(rhat[0] * E[1].x - rhat[1] * E[0].x) / eta0,
+                            -(rhat[0] * E[1].y - rhat[1] * E[0].y) / eta0);
 
             int o = 6 * p;
             EH_out[o + 0] = E[0];

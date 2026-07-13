@@ -50,19 +50,23 @@ PYOPENCL_CTX=0 python -m unittest tests/test_solver.py
 ---
 
 ## 5. MEEP Correctness Comparison
-To validate the physical and mathematical correctness of this solver against MEEP, a comparison script is provided. It sets up a matched simulation in both solvers, computes the far-field Poynting magnitude at 0°, and asserts that the difference is within `0.1 dB`.
-
-If MEEP is not locally installed, the script will automatically build and run MEEP inside a local conda-based Docker container:
+Supported features are validated extensively against [MEEP](https://meep.readthedocs.io/) (local install or `local-pymeep` Docker). The suite hard-fails if MEEP cannot run (set `ALLOW_SKIP_MEEP=1` only for environments without MEEP).
 
 ```bash
+PYOPENCL_CTX=0 python -m unittest tests.test_meep_validation -v
+# or
 PYOPENCL_CTX=0 python tests/compare_with_meep.py
 ```
 
-### Correctness Results
-When executed, the script yields a perfect match under the correct physical models:
-*   **OpenCL FDTD (calibrated):** `-224.9150 dB`
-*   **MEEP Reference (Docker):** `-224.9150 dB`
-*   **Calibrated Difference:** **`0.0000 dB`** (perfect numerical agreement)
+| Case | What it checks | Tolerance |
+|---|---|---|
+| Near-field Ex DFT | Yee + CPML + Ex sheet at interior probes | peak-normalized max err `< 0.20` |
+| Far-field \|S\|(θ) vacuum | Near-to-far XZ pattern vs Meep | main lobe (`mask_db=-12`) `< 2.5 dB` |
+| Far-field vector EH | Ex/Hy on +z; deep null on +x | pol. err `< 0.35`; \|E(+x)\|/\|E(+z)\| `< 0.05` |
+| Dielectric sphere εᵣ=4 | Material + pattern | main lobe `< 3 dB` |
+| PML energy decay | Late/peak Ex energy ratio | both `< 0.05`, ratios within 100× |
+
+OpenCL ↔ NumPy field/monitor parity remains in `tests/test_solver.py` (always run in CI).
 
 ---
 

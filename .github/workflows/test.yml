@@ -35,7 +35,7 @@ jobs:
         export PYOPENCL_CTX=0
         python -m unittest tests/test_solver.py
 
-    - name: Run MEEP Correctness Comparison (Docker)
+    - name: Run MEEP Feature Validation (Docker)
       run: |
         export PYOPENCL_CTX=0
-        python tests/compare_with_meep.py
+        python -m unittest tests.test_meep_validation -v
