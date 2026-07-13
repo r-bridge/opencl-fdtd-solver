@@ -93,7 +93,10 @@ class TestOpenCLEngineBasics(unittest.TestCase):
         self.assertEqual(fdtd.psi_x_size, 0)
         fdtd._sources.append(lambda f: f.add_source_Ex(10, 0.1))
         fdtd.run(5)
-        self.assertGreater(float(np.max(np.abs(fdtd.Ex))), 0.0)
+        fdtd.queue.finish()
+        ex = fdtd.Ex
+        self.assertTrue(np.all(np.isfinite(ex)))
+        self.assertGreater(float(np.max(np.abs(ex))), 0.0)
 
     def test_memory_error_when_over_budget(self):
         tiny = mock.Mock()
