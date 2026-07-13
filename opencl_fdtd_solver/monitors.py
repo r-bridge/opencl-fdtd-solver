@@ -259,6 +259,7 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         self._obs_buf = None
         self._obs_cap = 0
         self._eh_buf = None
+        self._nl_buf = None
         self._eh_cap = 0
 
         fdtd._monitors.append(self)
@@ -311,14 +312,19 @@ class OpenCLNear2FarMonitor(Near2FarBase):
             self._obs_buf = cl.Buffer(fdtd.ctx, mf.READ_ONLY, self._obs_cap * 3 * 4)
         if self._eh_buf is None or n_obs > self._eh_cap:
             self._eh_cap = max(n_obs, 64)
-            # 6 float2 per observation
+            # 6 float2 per observation (E,H)
             self._eh_buf = cl.Buffer(fdtd.ctx, mf.WRITE_ONLY, self._eh_cap * 6 * 8)
+            # Integrated N,L (also 6 float2 per obs)
+            self._nl_buf = cl.Buffer(fdtd.ctx, mf.READ_WRITE, self._eh_cap * 6 * 8)
 
     def get_farfields(self, obs_points) -> np.ndarray:
         """
         GPU far-field at many observation points.
 
-        Returns shape ``(n_obs, 6)`` complex64 (Ex,Ey,Ez,Hx,Hy,Hz).
+        Face samples are reduced in parallel (workgroup reduction + atomics);
+        observation angles run as the second launch dimension.
+
+        Returns shape ``(n_obs, 6)`` complex (Ex,Ey,Ez,Hx,Hy,Hz).
         """
         pts = np.asarray(obs_points, dtype=np.float32)
         if pts.ndim == 1:
@@ -326,25 +332,35 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         if pts.shape[1] != 3:
             raise ValueError("obs_points must be (n,3) or (3,)")
         n_obs = int(pts.shape[0])
+        n_face = int(self.n_face_samples)
         self._ensure_obs_bufs(n_obs)
         fdtd = self.fdtd
         flat = np.ascontiguousarray(pts.reshape(-1), dtype=np.float32)
         cl.enqueue_copy(fdtd.queue, self._obs_buf, flat)
+
+        # Zero N,L accumulators
+        zeros = np.zeros(n_obs * 6 * 2, dtype=np.float32)
+        cl.enqueue_copy(fdtd.queue, self._nl_buf, zeros)
 
         k_wave = np.float32(self.omega / C0)
         dl = np.float32(self.dl)
         eta0 = np.float32(ETA0)
         offs = [np.int32(o) for o in self._face_offsets]
 
-        fdtd.kern_farfield_from_faces(
-            fdtd.queue,
-            (n_obs,),
-            None,
+        # Prefer 256 threads along the face axis (power-of-two local reduce).
+        lsize0 = 256
+        while lsize0 > 1 and lsize0 > n_face:
+            lsize0 //= 2
+        lsize0 = max(1, lsize0)
+        g0 = ((n_face + lsize0 - 1) // lsize0) * lsize0
+        local_bytes = 6 * lsize0 * 8  # float2 scratch
+
+        fdtd.kern_farfield_accumulate_nl.set_args(
+            np.int32(n_face),
             np.int32(n_obs),
             self._obs_buf,
             k_wave,
             dl,
-            eta0,
             np.int32(self.ix0), np.int32(self.ix1),
             np.int32(self.iy0), np.int32(self.iy1),
             np.int32(self.iz0), np.int32(self.iz1),
@@ -355,6 +371,25 @@ class OpenCLNear2FarMonitor(Near2FarBase):
             self.Hx_dft_buf,
             self.Hy_dft_buf,
             self.Hz_dft_buf,
+            self._nl_buf,
+            cl.LocalMemory(local_bytes),
+        )
+        cl.enqueue_nd_range_kernel(
+            fdtd.queue,
+            fdtd.kern_farfield_accumulate_nl,
+            (g0, n_obs),
+            (lsize0, 1),
+        )
+
+        fdtd.kern_farfield_nl_to_eh(
+            fdtd.queue,
+            (n_obs,),
+            None,
+            np.int32(n_obs),
+            self._obs_buf,
+            k_wave,
+            eta0,
+            self._nl_buf,
             self._eh_buf,
         )
         host = np.empty(n_obs * 6 * 2, dtype=np.float32)
