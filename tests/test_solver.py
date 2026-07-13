@@ -79,14 +79,13 @@ class TestGenericFDTDSolver(unittest.TestCase):
             self.assertLess(diff, 1e-4, f"Field mismatch in {field}: {diff:.6e}")
 
     def test_opencl_monitors(self):
-        """Compare GPU DFT accumulation (OpenCLNear2FarMonitor) with host CPU accumulation."""
+        """GPU face-DFT + far-field should match host Near2FarBase on face interiors."""
         fdtd = OpenCLFDTD(self.shape, self.dl, npml=self.npml)
         fdtd.set_epsilon(self.eps)
 
         z_src = self.shape[2] - self.npml - 2
         fdtd._sources.append(lambda f: f.add_source_Ex(z_src, np.sin(2 * np.pi * self.freq * f.t)))
 
-        # Define Near2Far Huygens box coordinates
         ctr_phys = (30e-3, 30e-3, 30e-3)
         size_phys = (20e-3, 20e-3, 20e-3)
 
@@ -94,16 +93,28 @@ class TestGenericFDTDSolver(unittest.TestCase):
         cl_mon = OpenCLNear2FarMonitor(fdtd, ctr_phys, size_phys, self.freq)
 
         fdtd.run(80)
-        cl_mon.fetch_dft_fields()
 
-        # Ensure GPU DFT fields match host DFT fields exactly
-        for name in ['Ex_dft', 'Ey_dft', 'Ez_dft', 'Hx_dft', 'Hy_dft', 'Hz_dft']:
-            np_arr = getattr(np_mon, name)
-            cl_arr = getattr(cl_mon, name)
-            diff = np.max(np.abs(np_arr - cl_arr))
-            
-            self.assertGreater(np.max(np.abs(np_arr)), 0.0, f"Monitor DFT {name} is zero!")
-            self.assertLess(diff, 1e-4, f"Monitor DFT mismatch in {name}: {diff:.6e}")
+        obs_list = [
+            (0.0, 0.0, 1000.0),
+            (1000.0, 0.0, 0.0),
+            (707.1, 0.0, 707.1),
+        ]
+        for obs in obs_list:
+            ff_np = np_mon.get_farfield(obs)
+            ff_cl = cl_mon.get_farfield(obs)
+            diff = np.max(np.abs(ff_np - ff_cl))
+            self.assertGreater(np.max(np.abs(ff_cl)), 0.0, f"OpenCL far-field at {obs} is zero")
+            # Edge DFT differs slightly (NumPy double-counts shared edges); allow modest gap.
+            self.assertLess(diff, 5e-3, f"Far-field mismatch at {obs}: {diff:.6e}")
+
+        # Face-only download is much smaller than a full volume.
+        n_cells = self.shape[0] * self.shape[1] * self.shape[2]
+        self.assertLess(cl_mon.n_face_samples, n_cells // 2)
+
+        # Polar helper returns finite dB samples.
+        ang, db = cl_mon.farfield_polar_xz(distance_m=1000.0, n_angles=9)
+        self.assertEqual(len(ang), 9)
+        self.assertTrue(np.all(np.isfinite(db)))
 
 
 if __name__ == '__main__':
