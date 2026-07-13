@@ -60,8 +60,7 @@ def run_opencl_sim():
     n_steps = 500
     fdtd.run(n_steps)
 
-    # Fetch DFT fields and compute far-field at 1000m along +z axis (theta = 0)
-    monitor.fetch_dft_fields()
+    # Far-field at 1000 m along +z (GPU face DFT + OpenCL integral; no full-volume fetch)
     obs_point = (0.0, 0.0, 1000.0)
     ff = monitor.get_farfield(obs_point)
 
@@ -273,10 +272,10 @@ def main():
 
     # Validate difference: should be within 0.1 dB under correct physical model
     if db_diff < 0.1:
-        print("✓ Correctness verification PASSED! Solver matches MEEP closely.")
+        print("PASS: Correctness verification — solver matches MEEP closely.")
         sys.exit(0)
     else:
-        print("✗ Correctness verification FAILED! Discrepancy with MEEP is too high.")
+        print("FAIL: Correctness verification — discrepancy with MEEP is too high.")
         sys.exit(1)
 
 

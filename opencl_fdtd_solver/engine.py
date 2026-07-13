@@ -453,6 +453,7 @@ class OpenCLFDTD:
             Ex[idx] += amp;
         }
 
+        /* Legacy full-box DFT (volume buffer); prefer accumulate_dft_face. */
         __kernel void accumulate_dft(
             int Nx, int Ny, int Nz,
             int ix0, int ix1,
@@ -486,6 +487,236 @@ class OpenCLFDTD:
                 field_dft[idx] = current_dft;
             }
         }
+
+        /*
+         * Accumulate DFT onto one Huygens face into a packed float2 buffer.
+         * face_id: 0=x0, 1=x1, 2=y0, 3=y1, 4=z0, 5=z1
+         * Work size: (u, v) with u along the first face axis, v the second
+         *   x-faces: (nzf, nyf) → abs (ix, iy0+v, iz0+u)
+         *   y-faces: (nzf, nxf) → abs (ix0+v, iy, iz0+u)
+         *   z-faces: (nyf, nxf) → abs (ix0+v, iy0+u, iz)
+         */
+        __kernel void accumulate_dft_face(
+            int Nx, int Ny, int Nz,
+            int face_id,
+            int ix0, int ix1,
+            int iy0, int iy1,
+            int iz0, int iz1,
+            int face_offset,
+            float phase_real, float phase_imag,
+            __global const float *field,
+            __global float2 *face_dft
+        ) {
+            int u = get_global_id(0);
+            int v = get_global_id(1);
+            int abs_i, abs_j, abs_k;
+            int nxf = ix1 - ix0 + 1;
+            int nyf = iy1 - iy0 + 1;
+            int nzf = iz1 - iz0 + 1;
+            int face_li;
+
+            if (face_id == 0 || face_id == 1) {
+                if (u >= nzf || v >= nyf) return;
+                abs_i = (face_id == 0) ? ix0 : ix1;
+                abs_j = iy0 + v;
+                abs_k = iz0 + u;
+                face_li = v * nzf + u;
+            } else if (face_id == 2 || face_id == 3) {
+                if (u >= nzf || v >= nxf) return;
+                abs_i = ix0 + v;
+                abs_j = (face_id == 2) ? iy0 : iy1;
+                abs_k = iz0 + u;
+                face_li = v * nzf + u;
+            } else {
+                if (u >= nyf || v >= nxf) return;
+                abs_i = ix0 + v;
+                abs_j = iy0 + u;
+                abs_k = (face_id == 4) ? iz0 : iz1;
+                face_li = v * nyf + u;
+            }
+
+            int idx = abs_i * Ny * Nz + abs_j * Nz + abs_k;
+            float val = field[idx];
+            int dst = face_offset + face_li;
+            float2 cur = face_dft[dst];
+            cur.x += val * phase_real;
+            cur.y += val * phase_imag;
+            face_dft[dst] = cur;
+        }
+
+        inline float2 cmul(float2 a, float2 b) {
+            return (float2)(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+        }
+
+        inline void caccum(float2 *acc, float2 val) {
+            acc->x += val.x;
+            acc->y += val.y;
+        }
+
+        /*
+         * One work-item per observation point. Loops packed DFT faces and
+         * writes Ex,Ey,Ez,Hx,Hy,Hz as float2[6] per point.
+         */
+        __kernel void farfield_from_faces(
+            int n_obs,
+            __global const float *obs_xyz,
+            float k_wave,
+            float dl,
+            float eta0,
+            int ix0, int ix1,
+            int iy0, int iy1,
+            int iz0, int iz1,
+            int off0, int off1, int off2, int off3, int off4, int off5,
+            __global const float2 *Ex_f,
+            __global const float2 *Ey_f,
+            __global const float2 *Ez_f,
+            __global const float2 *Hx_f,
+            __global const float2 *Hy_f,
+            __global const float2 *Hz_f,
+            __global float2 *EH_out
+        ) {
+            int p = get_global_id(0);
+            if (p >= n_obs) return;
+
+            float ox = obs_xyz[3 * p + 0];
+            float oy = obs_xyz[3 * p + 1];
+            float oz = obs_xyz[3 * p + 2];
+            float r = sqrt(ox * ox + oy * oy + oz * oz);
+            if (r < 1.0e-30f) r = 1.0e-30f;
+            float rx = ox / r, ry = oy / r, rz = oz / r;
+
+            int nxf = ix1 - ix0 + 1;
+            int nyf = iy1 - iy0 + 1;
+            int nzf = iz1 - iz0 + 1;
+            float dA = dl * dl;
+
+            float2 Nx = (float2)(0.0f, 0.0f);
+            float2 Ny = (float2)(0.0f, 0.0f);
+            float2 Nz = (float2)(0.0f, 0.0f);
+            float2 Lx = (float2)(0.0f, 0.0f);
+            float2 Ly = (float2)(0.0f, 0.0f);
+            float2 Lz = (float2)(0.0f, 0.0f);
+
+            int face_offs[6] = { off0, off1, off2, off3, off4, off5 };
+            int face_ns[6] = { -1, 1, -1, 1, -1, 1 };
+
+            for (int face = 0; face < 6; face++) {
+                int nsgn = face_ns[face];
+                float nf = (float)nsgn;
+                int base = face_offs[face];
+
+                if (face == 0 || face == 1) {
+                    int abs_i = (face == 0) ? ix0 : ix1;
+                    float xp = abs_i * dl;
+                    for (int v = 0; v < nyf; v++) {
+                        float yp = (iy0 + v) * dl;
+                        for (int u = 0; u < nzf; u++) {
+                            float zp = (iz0 + u) * dl;
+                            int li = base + v * nzf + u;
+                            float phase = k_wave * (rx * xp + ry * yp + rz * zp);
+                            float2 ph = (float2)(cos(phase), sin(phase));
+                            float2 Jy = cmul((float2)( nf * Hz_f[li].x,  nf * Hz_f[li].y), ph);
+                            float2 Jz = cmul((float2)(-nf * Hy_f[li].x, -nf * Hy_f[li].y), ph);
+                            float2 My = cmul((float2)(-nf * Ez_f[li].x, -nf * Ez_f[li].y), ph);
+                            float2 Mz = cmul((float2)( nf * Ey_f[li].x,  nf * Ey_f[li].y), ph);
+                            caccum(&Ny, (float2)(Jy.x * dA, Jy.y * dA));
+                            caccum(&Nz, (float2)(Jz.x * dA, Jz.y * dA));
+                            caccum(&Ly, (float2)(My.x * dA, My.y * dA));
+                            caccum(&Lz, (float2)(Mz.x * dA, Mz.y * dA));
+                        }
+                    }
+                } else if (face == 2 || face == 3) {
+                    int abs_j = (face == 2) ? iy0 : iy1;
+                    float yp = abs_j * dl;
+                    for (int v = 0; v < nxf; v++) {
+                        float xp = (ix0 + v) * dl;
+                        for (int u = 0; u < nzf; u++) {
+                            float zp = (iz0 + u) * dl;
+                            int li = base + v * nzf + u;
+                            float phase = k_wave * (rx * xp + ry * yp + rz * zp);
+                            float2 ph = (float2)(cos(phase), sin(phase));
+                            float2 Jx = cmul((float2)(-nf * Hz_f[li].x, -nf * Hz_f[li].y), ph);
+                            float2 Jz = cmul((float2)( nf * Hx_f[li].x,  nf * Hx_f[li].y), ph);
+                            float2 Mx = cmul((float2)( nf * Ez_f[li].x,  nf * Ez_f[li].y), ph);
+                            float2 Mz = cmul((float2)(-nf * Ex_f[li].x, -nf * Ex_f[li].y), ph);
+                            caccum(&Nx, (float2)(Jx.x * dA, Jx.y * dA));
+                            caccum(&Nz, (float2)(Jz.x * dA, Jz.y * dA));
+                            caccum(&Lx, (float2)(Mx.x * dA, Mx.y * dA));
+                            caccum(&Lz, (float2)(Mz.x * dA, Mz.y * dA));
+                        }
+                    }
+                } else {
+                    int abs_k = (face == 4) ? iz0 : iz1;
+                    float zp = abs_k * dl;
+                    for (int v = 0; v < nxf; v++) {
+                        float xp = (ix0 + v) * dl;
+                        for (int u = 0; u < nyf; u++) {
+                            float yp = (iy0 + u) * dl;
+                            int li = base + v * nyf + u;
+                            float phase = k_wave * (rx * xp + ry * yp + rz * zp);
+                            float2 ph = (float2)(cos(phase), sin(phase));
+                            float2 Jx = cmul((float2)( nf * Hy_f[li].x,  nf * Hy_f[li].y), ph);
+                            float2 Jy = cmul((float2)(-nf * Hx_f[li].x, -nf * Hx_f[li].y), ph);
+                            float2 Mx = cmul((float2)(-nf * Ey_f[li].x, -nf * Ey_f[li].y), ph);
+                            float2 My = cmul((float2)( nf * Ex_f[li].x,  nf * Ex_f[li].y), ph);
+                            caccum(&Nx, (float2)(Jx.x * dA, Jx.y * dA));
+                            caccum(&Ny, (float2)(Jy.x * dA, Jy.y * dA));
+                            caccum(&Lx, (float2)(Mx.x * dA, Mx.y * dA));
+                            caccum(&Ly, (float2)(My.x * dA, My.y * dA));
+                        }
+                    }
+                }
+            }
+
+            /* prefactor = -1j * k / (4 pi r) * exp(1j k r) */
+            float ang = k_wave * r;
+            float2 eikr = (float2)(cos(ang), sin(ang));
+            float scale = k_wave / (4.0f * 3.14159265358979323846f * r);
+            float2 pref = cmul((float2)(0.0f, -scale), eikr);
+
+            float2 Nvec[3] = { Nx, Ny, Nz };
+            float2 Lvec[3] = { Lx, Ly, Lz };
+            float rhat[3] = { rx, ry, rz };
+
+            /* rxN = rhat × N ; rxL = rhat × L */
+            float2 rxN[3], rxL[3], Nt[3], Lt[3], E[3], H[3];
+            rxN[0] = (float2)(rhat[1] * Nvec[2].x - rhat[2] * Nvec[1].x,
+                              rhat[1] * Nvec[2].y - rhat[2] * Nvec[1].y);
+            rxN[1] = (float2)(rhat[2] * Nvec[0].x - rhat[0] * Nvec[2].x,
+                              rhat[2] * Nvec[0].y - rhat[0] * Nvec[2].y);
+            rxN[2] = (float2)(rhat[0] * Nvec[1].x - rhat[1] * Nvec[0].x,
+                              rhat[0] * Nvec[1].y - rhat[1] * Nvec[0].y);
+            rxL[0] = (float2)(rhat[1] * Lvec[2].x - rhat[2] * Lvec[1].x,
+                              rhat[1] * Lvec[2].y - rhat[2] * Lvec[1].y);
+            rxL[1] = (float2)(rhat[2] * Lvec[0].x - rhat[0] * Lvec[2].x,
+                              rhat[2] * Lvec[0].y - rhat[0] * Lvec[2].y);
+            rxL[2] = (float2)(rhat[0] * Lvec[1].x - rhat[1] * Lvec[0].x,
+                              rhat[0] * Lvec[1].y - rhat[1] * Lvec[0].y);
+
+            float2 Ndot = (float2)(
+                rhat[0] * Nvec[0].x + rhat[1] * Nvec[1].x + rhat[2] * Nvec[2].x,
+                rhat[0] * Nvec[0].y + rhat[1] * Nvec[1].y + rhat[2] * Nvec[2].y);
+            float2 Ldot = (float2)(
+                rhat[0] * Lvec[0].x + rhat[1] * Lvec[1].x + rhat[2] * Lvec[2].x,
+                rhat[0] * Lvec[0].y + rhat[1] * Lvec[1].y + rhat[2] * Lvec[2].y);
+
+            for (int c = 0; c < 3; c++) {
+                Nt[c] = (float2)(Nvec[c].x - Ndot.x * rhat[c], Nvec[c].y - Ndot.y * rhat[c]);
+                Lt[c] = (float2)(Lvec[c].x - Ldot.x * rhat[c], Lvec[c].y - Ldot.y * rhat[c]);
+                float2 tE = (float2)(Lt[c].x + eta0 * rxN[c].x, Lt[c].y + eta0 * rxN[c].y);
+                float2 tH = (float2)(Nt[c].x - rxL[c].x / eta0, Nt[c].y - rxL[c].y / eta0);
+                E[c] = cmul(pref, tE);
+                H[c] = cmul(pref, tH);
+            }
+
+            int o = 6 * p;
+            EH_out[o + 0] = E[0];
+            EH_out[o + 1] = E[1];
+            EH_out[o + 2] = E[2];
+            EH_out[o + 3] = H[0];
+            EH_out[o + 4] = H[1];
+            EH_out[o + 5] = H[2];
+        }
         """
         self.program = cl.Program(self.ctx, kernel_src).build()
         self.kern_update_H_interior = cl.Kernel(self.program, "update_H_interior")
@@ -494,6 +725,8 @@ class OpenCLFDTD:
         self.kern_update_E_pml = cl.Kernel(self.program, "update_E_pml")
         self.kern_add_source_Ex = cl.Kernel(self.program, "add_source_Ex")
         self.kern_accumulate_dft = cl.Kernel(self.program, "accumulate_dft")
+        self.kern_accumulate_dft_face = cl.Kernel(self.program, "accumulate_dft_face")
+        self.kern_farfield_from_faces = cl.Kernel(self.program, "farfield_from_faces")
 
         # Cached launch geometries (coalesced: Nz, Ny, Nx).
         self._gs_full = (self.Nz, self.Ny, self.Nx)
