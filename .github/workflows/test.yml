@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pocl-opencl-icd opencl-headers
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install numpy pyopencl h5py scipy matplotlib
+        pip install -e .
+
+    - name: Run Generic Unit Tests
+      run: |
+        export PYOPENCL_CTX=0
+        python -m unittest tests/test_solver.py
+
+    - name: Run MEEP Correctness Comparison (Docker)
+      run: |
+        export PYOPENCL_CTX=0
+        python tests/compare_with_meep.py

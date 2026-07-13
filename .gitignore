@@ -20,3 +20,6 @@ dist/
 
 # Jupyter notebook checkpoints
 .ipynb_checkpoints/
+
+# Local benchmark artifacts
+benchmarks/last_meep_benchmark.txt
