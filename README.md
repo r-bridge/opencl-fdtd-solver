@@ -100,4 +100,4 @@ Measured on NVIDIA GeForce RTX 5080 (15.92 GB reported), AMD Ryzen 9 7945HX, fie
 | Sustained OpenCL | 600³ × 100 steps | ~8740 MCUPS | — | — |
 | Near-capacity OpenCL | 750³ × 80 steps | ~8480 MCUPS | — | — |
 
-**Caveat:** enabling a near-to-far / DFT monitor used to cut MCUPS sharply because each step issued **36** face-DFT kernel launches. The fused tangential face DFT is now one launch per step; on a 200³ smoke test with a large box it stays near field-only rates (~7.3k vs ~7.4k MCUPS). Absolute MCUPS still depends on free VRAM — trust local runs over the table.
+Near-to-far uses a **single fused tangential face-DFT kernel** per step (not one launch per field×face). On a 200³ smoke test with a large Huygens box, sustained rates stay near field-only (~7.3k vs ~7.4k MCUPS). Absolute MCUPS still depends on free VRAM — trust local runs over the table.
