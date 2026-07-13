@@ -1,0 +1,17 @@
+# Coverage configuration for opencl_fdtd_solver
+[run]
+branch = True
+source = opencl_fdtd_solver
+omit =
+    */tests/*
+    */gprMax/*
+
+[report]
+precision = 1
+show_missing = True
+skip_covered = False
+fail_under = 90
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+    raise NotImplementedError

@@ -952,15 +952,14 @@ class OpenCLFDTD:
         dl = np.float32(self.dl)
         dtm_f = np.float32(dtm)
 
-        if self._gs_interior is not None:
-            self.kern_update_H_interior(
-                self.queue, self._gs_interior, None,
-                nx, ny, nz, npml, dl, dtm_f,
-                self.Ex_buf, self.Ey_buf, self.Ez_buf,
-                self.Hx_buf, self.Hy_buf, self.Hz_buf,
-            )
-
         if self.npml > 0:
+            if self._gs_interior is not None:
+                self.kern_update_H_interior(
+                    self.queue, self._gs_interior, None,
+                    nx, ny, nz, npml, dl, dtm_f,
+                    self.Ex_buf, self.Ey_buf, self.Ez_buf,
+                    self.Hx_buf, self.Hy_buf, self.Hz_buf,
+                )
             self.kern_update_H_pml(
                 self.queue, self._gs_full, None,
                 nx, ny, nz, npml, dl, dtm_f,
@@ -973,14 +972,21 @@ class OpenCLFDTD:
                 self.psi_Hy_x_buf, self.psi_Hy_z_buf,
                 self.psi_Hz_x_buf, self.psi_Hz_y_buf,
             )
-        elif self._gs_interior is None:
-            # npml == 0 and no interior box: update whole domain with PML kernel path disabled.
-            # Fall through should not happen for valid grids; treat as full interior.
-            self.kern_update_H_interior(
+        else:
+            # npml==0: use boundary-guarded full-domain kernel. The psi-free
+            # interior kernel assumes a viable stencil neighborhood and will
+            # read out-of-bounds if launched over the entire grid.
+            self.kern_update_H_pml(
                 self.queue, self._gs_full, None,
                 nx, ny, nz, np.int32(0), dl, dtm_f,
                 self.Ex_buf, self.Ey_buf, self.Ez_buf,
                 self.Hx_buf, self.Hy_buf, self.Hz_buf,
+                self.bx_buf, self.cx_buf, self.kx_buf,
+                self.by_buf, self.cy_buf, self.ky_buf,
+                self.bz_buf, self.cz_buf, self.kz_buf,
+                self.psi_Hx_y_buf, self.psi_Hx_z_buf,
+                self.psi_Hy_x_buf, self.psi_Hy_z_buf,
+                self.psi_Hz_x_buf, self.psi_Hz_y_buf,
             )
 
     def _update_E(self):
@@ -990,16 +996,15 @@ class OpenCLFDTD:
         dt = np.float32(self.dt)
         eps0 = np.float32(EPS0)
 
-        if self._gs_interior is not None:
-            self.kern_update_E_interior(
-                self.queue, self._gs_interior, None,
-                nx, ny, nz, npml, dl, dt, eps0,
-                self.eps_buf,
-                self.Hx_buf, self.Hy_buf, self.Hz_buf,
-                self.Ex_buf, self.Ey_buf, self.Ez_buf,
-            )
-
         if self.npml > 0:
+            if self._gs_interior is not None:
+                self.kern_update_E_interior(
+                    self.queue, self._gs_interior, None,
+                    nx, ny, nz, npml, dl, dt, eps0,
+                    self.eps_buf,
+                    self.Hx_buf, self.Hy_buf, self.Hz_buf,
+                    self.Ex_buf, self.Ey_buf, self.Ez_buf,
+                )
             self.kern_update_E_pml(
                 self.queue, self._gs_full, None,
                 nx, ny, nz, npml, dl, dt, eps0,
@@ -1013,13 +1018,19 @@ class OpenCLFDTD:
                 self.psi_Ey_x_buf, self.psi_Ey_z_buf,
                 self.psi_Ez_x_buf, self.psi_Ez_y_buf,
             )
-        elif self._gs_interior is None:
-            self.kern_update_E_interior(
+        else:
+            self.kern_update_E_pml(
                 self.queue, self._gs_full, None,
                 nx, ny, nz, np.int32(0), dl, dt, eps0,
                 self.eps_buf,
                 self.Hx_buf, self.Hy_buf, self.Hz_buf,
                 self.Ex_buf, self.Ey_buf, self.Ez_buf,
+                self.bx_buf, self.cx_buf, self.kx_buf,
+                self.by_buf, self.cy_buf, self.ky_buf,
+                self.bz_buf, self.cz_buf, self.kz_buf,
+                self.psi_Ex_y_buf, self.psi_Ex_z_buf,
+                self.psi_Ey_x_buf, self.psi_Ey_z_buf,
+                self.psi_Ez_x_buf, self.psi_Ez_y_buf,
             )
 
     def step(self):
@@ -1044,6 +1055,7 @@ class OpenCLFDTD:
     def _read_field(self, buf):
         host_arr = np.empty((self.Nx, self.Ny, self.Nz), dtype=self.dtype)
         cl.enqueue_copy(self.queue, host_arr, buf)
+        self.queue.finish()
         return host_arr
 
     def read_point(self, field_name, i, j, k):
@@ -1052,6 +1064,7 @@ class OpenCLFDTD:
         idx = int(i * self.Ny * self.Nz + j * self.Nz + k)
         dest = np.empty(1, dtype=self.dtype)
         cl.enqueue_copy(self.queue, dest, buf, src_offset=idx * 4)
+        self.queue.finish()
         return float(dest[0])
 
     @property

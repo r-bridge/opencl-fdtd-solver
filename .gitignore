@@ -23,3 +23,9 @@ dist/
 
 # Local benchmark artifacts
 benchmarks/last_meep_benchmark.txt
+
+# Coverage
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/

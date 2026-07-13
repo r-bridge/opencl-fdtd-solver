@@ -27,13 +27,20 @@ jobs:
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install numpy pyopencl h5py scipy matplotlib
+        pip install numpy pyopencl h5py scipy matplotlib coverage
         pip install -e .
 
-    - name: Run Generic Unit Tests
+    - name: Run unit tests with coverage
       run: |
         export PYOPENCL_CTX=0
-        python -m unittest tests/test_solver.py
+        python -m coverage run -m unittest \
+          tests.test_solver \
+          tests.test_unit_engine \
+          tests.test_unit_monitors \
+          tests.test_unit_harness \
+          -v
+        python -m coverage report --fail-under=90
+        python -m coverage xml
 
     - name: Run MEEP Feature Validation (Docker)
       run: |

@@ -41,10 +41,18 @@ $env:PYOPENCL_CTX='0'
 ---
 
 ## 4. Running Unit Tests
-A generic unit test suite is included to check OpenCL solver correctness and compare OpenCL monitors with the NumPy CPU reference engine:
+A generic unit test suite checks OpenCL ↔ NumPy field parity, near-to-far monitors, memory budgeting, and harness helpers. Aim for **≥90%** line coverage of `opencl_fdtd_solver/` (enforced in CI):
 
 ```bash
-PYOPENCL_CTX=0 python -m unittest tests/test_solver.py
+PYOPENCL_CTX=0 python -m coverage run -m unittest \
+  tests.test_solver tests.test_unit_engine tests.test_unit_monitors tests.test_unit_harness -v
+python -m coverage report --fail-under=90
+```
+
+Minimal smoke without coverage:
+
+```bash
+PYOPENCL_CTX=0 python -m unittest tests.test_solver tests.test_unit_engine tests.test_unit_monitors tests.test_unit_harness -v
 ```
 
 ---
