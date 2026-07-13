@@ -71,34 +71,33 @@ OpenCL ↔ NumPy field/monitor parity remains in `tests/test_solver.py` (always 
 ---
 
 ## 6. Performance Benchmarks
-Two benchmarks are provided: a small NumPy vs OpenCL check, and a large MEEP vs OpenCL GPU run sized near **16 GB** VRAM.
+Two benchmarks are provided: a small NumPy vs OpenCL check, and an OpenCL GPU vs MEEP CPU comparison.
+
+Throughput is **sustained** cell-updates after warm-up (`queue.finish()` around each timed window). Peak one-shot numbers are easy to overstate; if the model barely fits in VRAM the driver can page to host RAM and effective throughput can drop by ~10× without a clear OpenCL error. The solver therefore **raises `MemoryError` before allocation** when the estimate exceeds usable device memory (total minus 12% / 512 MiB headroom).
 
 ### Benchmark 1: NumPy CPU Reference vs OpenCL (1.0M Cells)
-Measures performance on a grid of **1.0M Yee cells** (`100×100×100`) for 50 steps:
+Includes near-to-far monitors (workload comparable to interactive use):
 
 ```bash
 PYOPENCL_CTX=0 python benchmarks/benchmark.py
 ```
+Re-run locally; do not treat older printed MCUPS as authoritative across machines or OpenCL backends.
 
-Results (AMD Ryzen 9 7945HX CPU, POCL OpenCL CPU fallback):
-*   **NumPy CPU:** `2.4012s` (`20.82 MCUPS`)
-*   **OpenCL (CPU Fallback):** `1.5550s` (`32.15 MCUPS`)
-*   **Speedup:** `1.54×` using OpenCL on CPU
-
-### Benchmark 2: MEEP CPU vs OpenCL GPU (421.9M Cells, ~12.3 GB)
-Compares MEEP (CPU, Docker) against this solver on an NVIDIA GPU. The default model is **750×750×750** Yee cells for **200 steps** (~421.9M cells, ~12.3 GB of float32 fields + face-local CPML ψ buffers) — sized near a **16 GB** GPU limit without host-memory spill. The script aborts if OpenCL selects a CPU device.
-
-Kernels use a coalesced `(k,j,i)` NDRange, a psi-free interior update, and face-local CPML storage (only the PML slabs allocate ψ).
+### Benchmark 2: MEEP CPU vs OpenCL GPU
+Compares MEEP (CPU, Docker `local-pymeep:latest`) against this solver on a GPU. Default grid is **600³** (~216M cells, ~6.4 GB) for stable VRAM headroom. Use `--shape 750` only if your GPU has clear free memory after the headroom check.
 
 ```bash
 PYOPENCL_CTX=0 python -u benchmarks/benchmark_vs_meep.py
+# OpenCL only (large grids / skip Docker):
+PYOPENCL_CTX=0 python -u benchmarks/benchmark_vs_meep.py --shape 600 --skip-meep
 ```
 
-| | Time | Throughput |
-|---|---:|---:|
-| **MEEP CPU** (`local-pymeep` Docker) | `1439.29s` | `58.62 MCUPS` |
-| **OpenCL FDTD GPU** (RTX 5080 16 GB) | `9.17s` | `9199.02 MCUPS` |
-| **Speedup** | | **`156.9×`** (OpenCL GPU faster) |
+Measured on NVIDIA GeForce RTX 5080 (15.92 GB reported), AMD Ryzen 9 7945HX, field updates + Ex sheet source, **no monitors** (median of 3 timed windows after warm-up):
 
-Hardware: NVIDIA GeForce RTX 5080 (15.92 GB reported), AMD Ryzen 9 7945HX host.
+| Case | Grid | OpenCL | MEEP CPU | Speedup |
+|---|---:|---:|---:|---:|
+| Relative (matched) | 400³ × 100 steps | ~8160 MCUPS | ~49 MCUPS | **~166×** |
+| Sustained OpenCL | 600³ × 100 steps | ~8740 MCUPS | — | — |
+| Near-capacity OpenCL | 750³ × 80 steps | ~8480 MCUPS | — | — |
 
+**Caveat:** enabling a near-to-far / DFT monitor used to cut MCUPS sharply because each step issued **36** face-DFT kernel launches. The fused tangential face DFT is now one launch per step; on a 200³ smoke test with a large box it stays near field-only rates (~7.3k vs ~7.4k MCUPS). Absolute MCUPS still depends on free VRAM — trust local runs over the table.
