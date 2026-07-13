@@ -553,16 +553,109 @@ class OpenCLFDTD:
             acc->y += val.y;
         }
 
+        inline void atomic_add_float(__global volatile float *addr, float val) {
+            union { unsigned int u; float f; } oldv, newv;
+            do {
+                oldv.f = *addr;
+                newv.f = oldv.f + val;
+            } while (atomic_cmpxchg(
+                         (__global volatile unsigned int *)addr, oldv.u, newv.u)
+                     != oldv.u);
+        }
+
+        inline void atomic_add_float2(__global float2 *addr, float2 val) {
+            __global float *p = (__global float *)addr;
+            atomic_add_float(&p[0], val.x);
+            atomic_add_float(&p[1], val.y);
+        }
+
+        /* Contribution of one packed face sample into N,L (6 float2). */
+        inline void face_sample_NL(
+            int face_i,
+            float rx, float ry, float rz,
+            float k_wave, float dA, float dl,
+            int ix0, int ix1, int iy0, int iy1, int iz0, int iz1,
+            int off0, int off1, int off2, int off3, int off4, int off5,
+            __global const float2 *Ex_f,
+            __global const float2 *Ey_f,
+            __global const float2 *Ez_f,
+            __global const float2 *Hx_f,
+            __global const float2 *Hy_f,
+            __global const float2 *Hz_f,
+            float2 *Nx, float2 *Ny, float2 *Nz,
+            float2 *Lx, float2 *Ly, float2 *Lz
+        ) {
+            int nxf = ix1 - ix0 + 1;
+            int nyf = iy1 - iy0 + 1;
+            int nzf = iz1 - iz0 + 1;
+            int face, loc, abs_i, abs_j, abs_k;
+            float nf, xp, yp, zp;
+
+            if (face_i < off1) {
+                face = 0; loc = face_i - off0; nf = -1.0f;
+                abs_i = ix0; abs_j = iy0 + loc / nzf; abs_k = iz0 + (loc - (loc / nzf) * nzf);
+            } else if (face_i < off2) {
+                face = 1; loc = face_i - off1; nf = 1.0f;
+                abs_i = ix1; abs_j = iy0 + loc / nzf; abs_k = iz0 + (loc - (loc / nzf) * nzf);
+            } else if (face_i < off3) {
+                face = 2; loc = face_i - off2; nf = -1.0f;
+                abs_i = ix0 + loc / nzf; abs_j = iy0; abs_k = iz0 + (loc - (loc / nzf) * nzf);
+            } else if (face_i < off4) {
+                face = 3; loc = face_i - off3; nf = 1.0f;
+                abs_i = ix0 + loc / nzf; abs_j = iy1; abs_k = iz0 + (loc - (loc / nzf) * nzf);
+            } else if (face_i < off5) {
+                face = 4; loc = face_i - off4; nf = -1.0f;
+                abs_i = ix0 + loc / nyf; abs_j = iy0 + (loc - (loc / nyf) * nyf); abs_k = iz0;
+            } else {
+                face = 5; loc = face_i - off5; nf = 1.0f;
+                abs_i = ix0 + loc / nyf; abs_j = iy0 + (loc - (loc / nyf) * nyf); abs_k = iz1;
+            }
+            (void)nxf;
+            xp = abs_i * dl; yp = abs_j * dl; zp = abs_k * dl;
+            int li = face_i;
+            float phase = k_wave * (rx * xp + ry * yp + rz * zp);
+            float2 ph = (float2)(cos(phase), sin(phase));
+
+            if (face <= 1) {
+                float2 Jy = cmul((float2)( nf * Hz_f[li].x,  nf * Hz_f[li].y), ph);
+                float2 Jz = cmul((float2)(-nf * Hy_f[li].x, -nf * Hy_f[li].y), ph);
+                float2 My = cmul((float2)(-nf * Ez_f[li].x, -nf * Ez_f[li].y), ph);
+                float2 Mz = cmul((float2)( nf * Ey_f[li].x,  nf * Ey_f[li].y), ph);
+                caccum(Ny, (float2)(Jy.x * dA, Jy.y * dA));
+                caccum(Nz, (float2)(Jz.x * dA, Jz.y * dA));
+                caccum(Ly, (float2)(My.x * dA, My.y * dA));
+                caccum(Lz, (float2)(Mz.x * dA, Mz.y * dA));
+            } else if (face <= 3) {
+                float2 Jx = cmul((float2)(-nf * Hz_f[li].x, -nf * Hz_f[li].y), ph);
+                float2 Jz = cmul((float2)( nf * Hx_f[li].x,  nf * Hx_f[li].y), ph);
+                float2 Mx = cmul((float2)( nf * Ez_f[li].x,  nf * Ez_f[li].y), ph);
+                float2 Mz = cmul((float2)(-nf * Ex_f[li].x, -nf * Ex_f[li].y), ph);
+                caccum(Nx, (float2)(Jx.x * dA, Jx.y * dA));
+                caccum(Nz, (float2)(Jz.x * dA, Jz.y * dA));
+                caccum(Lx, (float2)(Mx.x * dA, Mx.y * dA));
+                caccum(Lz, (float2)(Mz.x * dA, Mz.y * dA));
+            } else {
+                float2 Jx = cmul((float2)( nf * Hy_f[li].x,  nf * Hy_f[li].y), ph);
+                float2 Jy = cmul((float2)(-nf * Hx_f[li].x, -nf * Hx_f[li].y), ph);
+                float2 Mx = cmul((float2)(-nf * Ey_f[li].x, -nf * Ey_f[li].y), ph);
+                float2 My = cmul((float2)( nf * Ex_f[li].x,  nf * Ex_f[li].y), ph);
+                caccum(Nx, (float2)(Jx.x * dA, Jx.y * dA));
+                caccum(Ny, (float2)(Jy.x * dA, Jy.y * dA));
+                caccum(Lx, (float2)(Mx.x * dA, Mx.y * dA));
+                caccum(Ly, (float2)(My.x * dA, My.y * dA));
+            }
+        }
+
         /*
-         * One work-item per observation point. Loops packed DFT faces and
-         * writes Ex,Ey,Ez,Hx,Hy,Hz as float2[6] per point.
+         * Parallel over face samples (dim0) and observation points (dim1).
+         * Local reduction along dim0, then atomic add into NL[obs*6 + c].
          */
-        __kernel void farfield_from_faces(
+        __kernel void farfield_accumulate_nl(
+            int n_face,
             int n_obs,
             __global const float *obs_xyz,
             float k_wave,
             float dl,
-            float eta0,
             int ix0, int ix1,
             int iy0, int iy1,
             int iz0, int iz1,
@@ -573,6 +666,75 @@ class OpenCLFDTD:
             __global const float2 *Hx_f,
             __global const float2 *Hy_f,
             __global const float2 *Hz_f,
+            __global float2 *NL_out,
+            __local float2 *scratch
+        ) {
+            int face_i = get_global_id(0);
+            int obs = get_global_id(1);
+            int lid = get_local_id(0);
+            int lsize = get_local_size(0);
+
+            float2 Nx = (float2)(0.0f, 0.0f);
+            float2 Ny = (float2)(0.0f, 0.0f);
+            float2 Nz = (float2)(0.0f, 0.0f);
+            float2 Lx = (float2)(0.0f, 0.0f);
+            float2 Ly = (float2)(0.0f, 0.0f);
+            float2 Lz = (float2)(0.0f, 0.0f);
+
+            if (face_i < n_face && obs < n_obs) {
+                float ox = obs_xyz[3 * obs + 0];
+                float oy = obs_xyz[3 * obs + 1];
+                float oz = obs_xyz[3 * obs + 2];
+                float r = sqrt(ox * ox + oy * oy + oz * oz);
+                if (r < 1.0e-30f) r = 1.0e-30f;
+                float rx = ox / r, ry = oy / r, rz = oz / r;
+                float dA = dl * dl;
+                face_sample_NL(
+                    face_i, rx, ry, rz, k_wave, dA, dl,
+                    ix0, ix1, iy0, iy1, iz0, iz1,
+                    off0, off1, off2, off3, off4, off5,
+                    Ex_f, Ey_f, Ez_f, Hx_f, Hy_f, Hz_f,
+                    &Nx, &Ny, &Nz, &Lx, &Ly, &Lz);
+            }
+
+            /* scratch layout: [comp][lid], comp=0..5 */
+            scratch[0 * lsize + lid] = Nx;
+            scratch[1 * lsize + lid] = Ny;
+            scratch[2 * lsize + lid] = Nz;
+            scratch[3 * lsize + lid] = Lx;
+            scratch[4 * lsize + lid] = Ly;
+            scratch[5 * lsize + lid] = Lz;
+            barrier(CLK_LOCAL_MEM_FENCE);
+
+            for (int stride = lsize >> 1; stride > 0; stride >>= 1) {
+                if (lid < stride) {
+                    for (int c = 0; c < 6; c++) {
+                        int a = c * lsize + lid;
+                        scratch[a].x += scratch[a + stride].x;
+                        scratch[a].y += scratch[a + stride].y;
+                    }
+                }
+                barrier(CLK_LOCAL_MEM_FENCE);
+            }
+
+            if (lid == 0 && obs < n_obs) {
+                int base = 6 * obs;
+                atomic_add_float2(&NL_out[base + 0], scratch[0 * lsize]);
+                atomic_add_float2(&NL_out[base + 1], scratch[1 * lsize]);
+                atomic_add_float2(&NL_out[base + 2], scratch[2 * lsize]);
+                atomic_add_float2(&NL_out[base + 3], scratch[3 * lsize]);
+                atomic_add_float2(&NL_out[base + 4], scratch[4 * lsize]);
+                atomic_add_float2(&NL_out[base + 5], scratch[5 * lsize]);
+            }
+        }
+
+        /* Convert integrated N,L → far E,H for each observation. */
+        __kernel void farfield_nl_to_eh(
+            int n_obs,
+            __global const float *obs_xyz,
+            float k_wave,
+            float eta0,
+            __global const float2 *NL_in,
             __global float2 *EH_out
         ) {
             int p = get_global_id(0);
@@ -584,101 +746,16 @@ class OpenCLFDTD:
             float r = sqrt(ox * ox + oy * oy + oz * oz);
             if (r < 1.0e-30f) r = 1.0e-30f;
             float rx = ox / r, ry = oy / r, rz = oz / r;
+            float rhat[3] = { rx, ry, rz };
 
-            int nxf = ix1 - ix0 + 1;
-            int nyf = iy1 - iy0 + 1;
-            int nzf = iz1 - iz0 + 1;
-            float dA = dl * dl;
+            float2 Nvec[3] = { NL_in[6 * p + 0], NL_in[6 * p + 1], NL_in[6 * p + 2] };
+            float2 Lvec[3] = { NL_in[6 * p + 3], NL_in[6 * p + 4], NL_in[6 * p + 5] };
 
-            float2 Nx = (float2)(0.0f, 0.0f);
-            float2 Ny = (float2)(0.0f, 0.0f);
-            float2 Nz = (float2)(0.0f, 0.0f);
-            float2 Lx = (float2)(0.0f, 0.0f);
-            float2 Ly = (float2)(0.0f, 0.0f);
-            float2 Lz = (float2)(0.0f, 0.0f);
-
-            int face_offs[6] = { off0, off1, off2, off3, off4, off5 };
-            int face_ns[6] = { -1, 1, -1, 1, -1, 1 };
-
-            for (int face = 0; face < 6; face++) {
-                int nsgn = face_ns[face];
-                float nf = (float)nsgn;
-                int base = face_offs[face];
-
-                if (face == 0 || face == 1) {
-                    int abs_i = (face == 0) ? ix0 : ix1;
-                    float xp = abs_i * dl;
-                    for (int v = 0; v < nyf; v++) {
-                        float yp = (iy0 + v) * dl;
-                        for (int u = 0; u < nzf; u++) {
-                            float zp = (iz0 + u) * dl;
-                            int li = base + v * nzf + u;
-                            float phase = k_wave * (rx * xp + ry * yp + rz * zp);
-                            float2 ph = (float2)(cos(phase), sin(phase));
-                            float2 Jy = cmul((float2)( nf * Hz_f[li].x,  nf * Hz_f[li].y), ph);
-                            float2 Jz = cmul((float2)(-nf * Hy_f[li].x, -nf * Hy_f[li].y), ph);
-                            float2 My = cmul((float2)(-nf * Ez_f[li].x, -nf * Ez_f[li].y), ph);
-                            float2 Mz = cmul((float2)( nf * Ey_f[li].x,  nf * Ey_f[li].y), ph);
-                            caccum(&Ny, (float2)(Jy.x * dA, Jy.y * dA));
-                            caccum(&Nz, (float2)(Jz.x * dA, Jz.y * dA));
-                            caccum(&Ly, (float2)(My.x * dA, My.y * dA));
-                            caccum(&Lz, (float2)(Mz.x * dA, Mz.y * dA));
-                        }
-                    }
-                } else if (face == 2 || face == 3) {
-                    int abs_j = (face == 2) ? iy0 : iy1;
-                    float yp = abs_j * dl;
-                    for (int v = 0; v < nxf; v++) {
-                        float xp = (ix0 + v) * dl;
-                        for (int u = 0; u < nzf; u++) {
-                            float zp = (iz0 + u) * dl;
-                            int li = base + v * nzf + u;
-                            float phase = k_wave * (rx * xp + ry * yp + rz * zp);
-                            float2 ph = (float2)(cos(phase), sin(phase));
-                            float2 Jx = cmul((float2)(-nf * Hz_f[li].x, -nf * Hz_f[li].y), ph);
-                            float2 Jz = cmul((float2)( nf * Hx_f[li].x,  nf * Hx_f[li].y), ph);
-                            float2 Mx = cmul((float2)( nf * Ez_f[li].x,  nf * Ez_f[li].y), ph);
-                            float2 Mz = cmul((float2)(-nf * Ex_f[li].x, -nf * Ex_f[li].y), ph);
-                            caccum(&Nx, (float2)(Jx.x * dA, Jx.y * dA));
-                            caccum(&Nz, (float2)(Jz.x * dA, Jz.y * dA));
-                            caccum(&Lx, (float2)(Mx.x * dA, Mx.y * dA));
-                            caccum(&Lz, (float2)(Mz.x * dA, Mz.y * dA));
-                        }
-                    }
-                } else {
-                    int abs_k = (face == 4) ? iz0 : iz1;
-                    float zp = abs_k * dl;
-                    for (int v = 0; v < nxf; v++) {
-                        float xp = (ix0 + v) * dl;
-                        for (int u = 0; u < nyf; u++) {
-                            float yp = (iy0 + u) * dl;
-                            int li = base + v * nyf + u;
-                            float phase = k_wave * (rx * xp + ry * yp + rz * zp);
-                            float2 ph = (float2)(cos(phase), sin(phase));
-                            float2 Jx = cmul((float2)( nf * Hy_f[li].x,  nf * Hy_f[li].y), ph);
-                            float2 Jy = cmul((float2)(-nf * Hx_f[li].x, -nf * Hx_f[li].y), ph);
-                            float2 Mx = cmul((float2)(-nf * Ey_f[li].x, -nf * Ey_f[li].y), ph);
-                            float2 My = cmul((float2)( nf * Ex_f[li].x,  nf * Ex_f[li].y), ph);
-                            caccum(&Nx, (float2)(Jx.x * dA, Jx.y * dA));
-                            caccum(&Ny, (float2)(Jy.x * dA, Jy.y * dA));
-                            caccum(&Lx, (float2)(Mx.x * dA, Mx.y * dA));
-                            caccum(&Ly, (float2)(My.x * dA, My.y * dA));
-                        }
-                    }
-                }
-            }
-
-            /* prefactor = -1j * k / (4 pi r) * exp(1j k r) */
             float ang = k_wave * r;
             float2 eikr = (float2)(cos(ang), sin(ang));
             float scale = k_wave / (4.0f * 3.14159265358979323846f * r);
             float2 pref = cmul((float2)(0.0f, -scale), eikr);
 
-            float2 Nvec[3] = { Nx, Ny, Nz };
-            float2 Lvec[3] = { Lx, Ly, Lz };
-            float rhat[3] = { rx, ry, rz };
-
-            /* rxN = rhat × N ; rxL = rhat × L */
             float2 rxN[3], rxL[3], Nt[3], Lt[3], E[3], H[3];
             rxN[0] = (float2)(rhat[1] * Nvec[2].x - rhat[2] * Nvec[1].x,
                               rhat[1] * Nvec[2].y - rhat[2] * Nvec[1].y);
@@ -726,7 +803,8 @@ class OpenCLFDTD:
         self.kern_add_source_Ex = cl.Kernel(self.program, "add_source_Ex")
         self.kern_accumulate_dft = cl.Kernel(self.program, "accumulate_dft")
         self.kern_accumulate_dft_face = cl.Kernel(self.program, "accumulate_dft_face")
-        self.kern_farfield_from_faces = cl.Kernel(self.program, "farfield_from_faces")
+        self.kern_farfield_accumulate_nl = cl.Kernel(self.program, "farfield_accumulate_nl")
+        self.kern_farfield_nl_to_eh = cl.Kernel(self.program, "farfield_nl_to_eh")
 
         # Cached launch geometries (coalesced: Nz, Ny, Nx).
         self._gs_full = (self.Nz, self.Ny, self.Nx)
