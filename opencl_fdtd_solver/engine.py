@@ -34,6 +34,12 @@ class OpenCLFDTD:
     Supports pluggable monitors (NumPy and OpenCL models).
     """
 
+    # Leave headroom for the OpenCL runtime, framebuffer, and other processes.
+    # Without this, allocation may "succeed" while the driver pages to host RAM
+    # and effective throughput collapses by an order of magnitude.
+    MEMORY_HEADROOM_FRACTION = 0.12
+    MEMORY_HEADROOM_BYTES = 512 * 1024 * 1024
+
     def __init__(self, shape, dl, npml=20, dtype=np.float32, ctx=None, queue=None):
         """
         shape : (Nx, Ny, Nz) Yee cells
@@ -81,6 +87,8 @@ class OpenCLFDTD:
             self.queue = queue
 
         print(f"OpenCL FDTD Solver initialized on device: {self.device.name}")
+
+        self._check_device_memory(shape, self.npml, self.dtype)
 
         # Yee field arrays size
         self.size = self.Nx * self.Ny * self.Nz
@@ -209,6 +217,35 @@ class OpenCLFDTD:
         ) * item
         # 1D CPML coeff arrays are negligible
         return fields + psi
+
+    @classmethod
+    def device_memory_budget_bytes(cls, device):
+        """Usable device memory after reserved headroom."""
+        total = int(device.global_mem_size)
+        reserve = max(
+            int(total * cls.MEMORY_HEADROOM_FRACTION),
+            int(cls.MEMORY_HEADROOM_BYTES),
+        )
+        return max(0, total - reserve)
+
+    def _check_device_memory(self, shape, npml, dtype):
+        """Raise before allocation if the model cannot fit with headroom."""
+        needed = self.estimate_device_memory_bytes(shape, npml, dtype)
+        budget = self.device_memory_budget_bytes(self.device)
+        total = int(self.device.global_mem_size)
+        if needed > budget:
+            reserve = max(
+                int(total * self.MEMORY_HEADROOM_FRACTION),
+                int(self.MEMORY_HEADROOM_BYTES),
+            )
+            raise MemoryError(
+                f"Model needs ~{needed / (1024 ** 3):.2f} GB device memory, but "
+                f"{self.device.name} only has ~{budget / (1024 ** 3):.2f} GB usable "
+                f"({total / (1024 ** 3):.2f} GB total minus "
+                f"{reserve / (1024 ** 3):.2f} GB headroom). "
+                f"Reduce the grid or npml; continuing would risk silent host paging "
+                f"and order-of-magnitude slower runs."
+            )
 
     def _compile_kernels(self):
         """Compile Yee-grid FDTD update kernels (coalesced NDRange + interior/PML split)."""
@@ -544,6 +581,90 @@ class OpenCLFDTD:
             face_dft[dst] = cur;
         }
 
+        inline void dft_add(__global float2 *slot, float val, float pr, float pi) {
+            float2 cur = *slot;
+            cur.x += val * pr;
+            cur.y += val * pi;
+            *slot = cur;
+        }
+
+        /*
+         * One launch over packed face samples: for each Huygens face sample,
+         * DFT only the tangential Ex..Hz components that enter the N/L integral.
+         * Replaces 36 per-step accumulate_dft_face launches.
+         */
+        __kernel void accumulate_dft_faces_fused(
+            int Nx, int Ny, int Nz,
+            int ix0, int ix1,
+            int iy0, int iy1,
+            int iz0, int iz1,
+            int off0, int off1, int off2, int off3, int off4, int off5,
+            int n_face,
+            float phase_real, float phase_imag,
+            __global const float *Ex,
+            __global const float *Ey,
+            __global const float *Ez,
+            __global const float *Hx,
+            __global const float *Hy,
+            __global const float *Hz,
+            __global float2 *Ex_dft,
+            __global float2 *Ey_dft,
+            __global float2 *Ez_dft,
+            __global float2 *Hx_dft,
+            __global float2 *Hy_dft,
+            __global float2 *Hz_dft
+        ) {
+            int face_i = get_global_id(0);
+            if (face_i >= n_face) return;
+
+            int nxf = ix1 - ix0 + 1;
+            int nyf = iy1 - iy0 + 1;
+            int nzf = iz1 - iz0 + 1;
+            int face, loc, abs_i, abs_j, abs_k;
+
+            if (face_i < off1) {
+                face = 0; loc = face_i - off0;
+                abs_i = ix0; abs_j = iy0 + loc / nzf; abs_k = iz0 + (loc - (loc / nzf) * nzf);
+            } else if (face_i < off2) {
+                face = 1; loc = face_i - off1;
+                abs_i = ix1; abs_j = iy0 + loc / nzf; abs_k = iz0 + (loc - (loc / nzf) * nzf);
+            } else if (face_i < off3) {
+                face = 2; loc = face_i - off2;
+                abs_i = ix0 + loc / nzf; abs_j = iy0; abs_k = iz0 + (loc - (loc / nzf) * nzf);
+            } else if (face_i < off4) {
+                face = 3; loc = face_i - off3;
+                abs_i = ix0 + loc / nzf; abs_j = iy1; abs_k = iz0 + (loc - (loc / nzf) * nzf);
+            } else if (face_i < off5) {
+                face = 4; loc = face_i - off4;
+                abs_i = ix0 + loc / nyf; abs_j = iy0 + (loc - (loc / nyf) * nyf); abs_k = iz0;
+            } else {
+                face = 5; loc = face_i - off5;
+                abs_i = ix0 + loc / nyf; abs_j = iy0 + (loc - (loc / nyf) * nyf); abs_k = iz1;
+            }
+            (void)nxf;
+
+            int idx = abs_i * Ny * Nz + abs_j * Nz + abs_k;
+            float pr = phase_real, pi = phase_imag;
+
+            /* Tangential only (same components as face_sample_NL). */
+            if (face <= 1) {
+                dft_add(&Ey_dft[face_i], Ey[idx], pr, pi);
+                dft_add(&Ez_dft[face_i], Ez[idx], pr, pi);
+                dft_add(&Hy_dft[face_i], Hy[idx], pr, pi);
+                dft_add(&Hz_dft[face_i], Hz[idx], pr, pi);
+            } else if (face <= 3) {
+                dft_add(&Ex_dft[face_i], Ex[idx], pr, pi);
+                dft_add(&Ez_dft[face_i], Ez[idx], pr, pi);
+                dft_add(&Hx_dft[face_i], Hx[idx], pr, pi);
+                dft_add(&Hz_dft[face_i], Hz[idx], pr, pi);
+            } else {
+                dft_add(&Ex_dft[face_i], Ex[idx], pr, pi);
+                dft_add(&Ey_dft[face_i], Ey[idx], pr, pi);
+                dft_add(&Hx_dft[face_i], Hx[idx], pr, pi);
+                dft_add(&Hy_dft[face_i], Hy[idx], pr, pi);
+            }
+        }
+
         inline float2 cmul(float2 a, float2 b) {
             return (float2)(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
         }
@@ -752,17 +873,12 @@ class OpenCLFDTD:
             float2 Lvec[3] = { NL_in[6 * p + 3], NL_in[6 * p + 4], NL_in[6 * p + 5] };
 
             float ang = k_wave * r;
-            float2 eikr = (float2)(cos(ang), sin(ang));
+            // Outgoing wave ~ e^{-j k r}
+            float2 eikr = (float2)(cos(ang), -sin(ang));
             float scale = k_wave / (4.0f * 3.14159265358979323846f * r);
             float2 pref = cmul((float2)(0.0f, -scale), eikr);
 
-            float2 rxN[3], rxL[3], Nt[3], Lt[3], E[3], H[3];
-            rxN[0] = (float2)(rhat[1] * Nvec[2].x - rhat[2] * Nvec[1].x,
-                              rhat[1] * Nvec[2].y - rhat[2] * Nvec[1].y);
-            rxN[1] = (float2)(rhat[2] * Nvec[0].x - rhat[0] * Nvec[2].x,
-                              rhat[2] * Nvec[0].y - rhat[0] * Nvec[2].y);
-            rxN[2] = (float2)(rhat[0] * Nvec[1].x - rhat[1] * Nvec[0].x,
-                              rhat[0] * Nvec[1].y - rhat[1] * Nvec[0].y);
+            float2 rxL[3], Nt[3], E[3], H[3];
             rxL[0] = (float2)(rhat[1] * Lvec[2].x - rhat[2] * Lvec[1].x,
                               rhat[1] * Lvec[2].y - rhat[2] * Lvec[1].y);
             rxL[1] = (float2)(rhat[2] * Lvec[0].x - rhat[0] * Lvec[2].x,
@@ -773,18 +889,19 @@ class OpenCLFDTD:
             float2 Ndot = (float2)(
                 rhat[0] * Nvec[0].x + rhat[1] * Nvec[1].x + rhat[2] * Nvec[2].x,
                 rhat[0] * Nvec[0].y + rhat[1] * Nvec[1].y + rhat[2] * Nvec[2].y);
-            float2 Ldot = (float2)(
-                rhat[0] * Lvec[0].x + rhat[1] * Lvec[1].x + rhat[2] * Lvec[2].x,
-                rhat[0] * Lvec[0].y + rhat[1] * Lvec[1].y + rhat[2] * Lvec[2].y);
 
             for (int c = 0; c < 3; c++) {
                 Nt[c] = (float2)(Nvec[c].x - Ndot.x * rhat[c], Nvec[c].y - Ndot.y * rhat[c]);
-                Lt[c] = (float2)(Lvec[c].x - Ldot.x * rhat[c], Lvec[c].y - Ldot.y * rhat[c]);
-                float2 tE = (float2)(Lt[c].x + eta0 * rxN[c].x, Lt[c].y + eta0 * rxN[c].y);
-                float2 tH = (float2)(Nt[c].x - rxL[c].x / eta0, Nt[c].y - rxL[c].y / eta0);
+                float2 tE = (float2)(eta0 * Nt[c].x + rxL[c].x, eta0 * Nt[c].y + rxL[c].y);
                 E[c] = cmul(pref, tE);
-                H[c] = cmul(pref, tH);
             }
+            // Far-field TEM: H = -r̂ × E / η
+            H[0] = (float2)(-(rhat[1] * E[2].x - rhat[2] * E[1].x) / eta0,
+                            -(rhat[1] * E[2].y - rhat[2] * E[1].y) / eta0);
+            H[1] = (float2)(-(rhat[2] * E[0].x - rhat[0] * E[2].x) / eta0,
+                            -(rhat[2] * E[0].y - rhat[0] * E[2].y) / eta0);
+            H[2] = (float2)(-(rhat[0] * E[1].x - rhat[1] * E[0].x) / eta0,
+                            -(rhat[0] * E[1].y - rhat[1] * E[0].y) / eta0);
 
             int o = 6 * p;
             EH_out[o + 0] = E[0];
@@ -803,6 +920,9 @@ class OpenCLFDTD:
         self.kern_add_source_Ex = cl.Kernel(self.program, "add_source_Ex")
         self.kern_accumulate_dft = cl.Kernel(self.program, "accumulate_dft")
         self.kern_accumulate_dft_face = cl.Kernel(self.program, "accumulate_dft_face")
+        self.kern_accumulate_dft_faces_fused = cl.Kernel(
+            self.program, "accumulate_dft_faces_fused"
+        )
         self.kern_farfield_accumulate_nl = cl.Kernel(self.program, "farfield_accumulate_nl")
         self.kern_farfield_nl_to_eh = cl.Kernel(self.program, "farfield_nl_to_eh")
 
