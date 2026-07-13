@@ -146,19 +146,17 @@ class Near2FarBase:
                 Lx_int += np.sum(M_x * phase_factor) * dA
                 Ly_int += np.sum(M_y * phase_factor) * dA
 
-        prefactor = -1j * k / (4.0 * np.pi * r) * np.exp(1j * k * r)
+        prefactor = -1j * k / (4.0 * np.pi * r) * np.exp(-1j * k * r)
         N = np.array([Nx_int, Ny_int, Nz_int])
         L = np.array([Lx_int, Ly_int, Lz_int])
         rhat = np.array([rx, ry, rz])
 
-        rxN = np.cross(rhat, N)
         rxL = np.cross(rhat, L)
-
         N_t = N - np.dot(rhat, N) * rhat
-        L_t = L - np.dot(rhat, L) * rhat
 
-        E_far = prefactor * (L_t + ETA0 * rxN)
-        H_far = prefactor * (N_t - rxL / ETA0)
+        # E ∝ η N_⊥ + r̂×L   (Balanis / Taflove far-field equivalence)
+        E_far = prefactor * (ETA0 * N_t + rxL)
+        H_far = -np.cross(rhat, E_far) / ETA0
 
         return np.array([
             E_far[0], E_far[1], E_far[2],
@@ -262,47 +260,47 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         self._nl_buf = None
         self._eh_cap = 0
 
+        # Phase recurrence: phase_{n+1} = phase_n * exp(j ω Δt)
+        self._dphase = np.exp(1j * self.omega * float(fdtd.dt))
+        self._phase = None
+        self._offs_i32 = tuple(np.int32(o) for o in self._face_offsets)
+        self._box_i32 = (
+            np.int32(self.ix0), np.int32(self.ix1),
+            np.int32(self.iy0), np.int32(self.iy1),
+            np.int32(self.iz0), np.int32(self.iz1),
+        )
+        self._n_face_i32 = np.int32(self.n_face_samples)
+        self._nx_i32 = np.int32(fdtd.Nx)
+        self._ny_i32 = np.int32(fdtd.Ny)
+        self._nz_i32 = np.int32(fdtd.Nz)
+
         fdtd._monitors.append(self)
 
     def __call__(self, fdtd):
-        phase = np.exp(1j * self.omega * fdtd.t) * fdtd.dt
-        phase_real = np.float32(phase.real)
-        phase_imag = np.float32(phase.imag)
+        if self._phase is None:
+            self._phase = np.exp(1j * self.omega * fdtd.t) * fdtd.dt
+        else:
+            self._phase *= self._dphase
 
-        nx = np.int32(fdtd.Nx)
-        ny = np.int32(fdtd.Ny)
-        nz = np.int32(fdtd.Nz)
-        ix0, ix1 = np.int32(self.ix0), np.int32(self.ix1)
-        iy0, iy1 = np.int32(self.iy0), np.int32(self.iy1)
-        iz0, iz1 = np.int32(self.iz0), np.int32(self.iz1)
+        pr = np.float32(self._phase.real)
+        pi = np.float32(self._phase.imag)
+        o0, o1, o2, o3, o4, o5 = self._offs_i32
+        ix0, ix1, iy0, iy1, iz0, iz1 = self._box_i32
 
-        def _acc(field_buf, dft_buf):
-            for face_id in range(6):
-                if face_id in (0, 1):
-                    gsize = (self.nzf, self.nyf)
-                elif face_id in (2, 3):
-                    gsize = (self.nzf, self.nxf)
-                else:
-                    gsize = (self.nyf, self.nxf)
-                fdtd.kern_accumulate_dft_face(
-                    fdtd.queue,
-                    gsize,
-                    None,
-                    nx, ny, nz,
-                    np.int32(face_id),
-                    ix0, ix1, iy0, iy1, iz0, iz1,
-                    np.int32(self._face_offsets[face_id]),
-                    phase_real, phase_imag,
-                    field_buf,
-                    dft_buf,
-                )
-
-        _acc(fdtd.Ex_buf, self.Ex_dft_buf)
-        _acc(fdtd.Ey_buf, self.Ey_dft_buf)
-        _acc(fdtd.Ez_buf, self.Ez_dft_buf)
-        _acc(fdtd.Hx_buf, self.Hx_dft_buf)
-        _acc(fdtd.Hy_buf, self.Hy_dft_buf)
-        _acc(fdtd.Hz_buf, self.Hz_dft_buf)
+        fdtd.kern_accumulate_dft_faces_fused(
+            fdtd.queue,
+            (self.n_face_samples,),
+            None,
+            self._nx_i32, self._ny_i32, self._nz_i32,
+            ix0, ix1, iy0, iy1, iz0, iz1,
+            o0, o1, o2, o3, o4, o5,
+            self._n_face_i32,
+            pr, pi,
+            fdtd.Ex_buf, fdtd.Ey_buf, fdtd.Ez_buf,
+            fdtd.Hx_buf, fdtd.Hy_buf, fdtd.Hz_buf,
+            self.Ex_dft_buf, self.Ey_dft_buf, self.Ez_dft_buf,
+            self.Hx_dft_buf, self.Hy_dft_buf, self.Hz_dft_buf,
+        )
 
     def _ensure_obs_bufs(self, n_obs: int) -> None:
         mf = cl.mem_flags
@@ -474,12 +472,24 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         return faces
 
 
-def _poynting_db(ff) -> tuple[float, float]:
+def _poynting_mag(ff) -> float:
     E = ff[0:3]
     H = ff[3:6]
     Sx = 0.5 * (E[1] * np.conj(H[2]) - E[2] * np.conj(H[1]))
     Sy = 0.5 * (E[2] * np.conj(H[0]) - E[0] * np.conj(H[2]))
     Sz = 0.5 * (E[0] * np.conj(H[1]) - E[1] * np.conj(H[0]))
-    mag = float(np.sqrt(np.abs(Sx) ** 2 + np.abs(Sy) ** 2 + np.abs(Sz) ** 2))
-    db = float(20.0 * np.log10(max(mag, 1e-30)))
-    return db, mag
+    return float(np.sqrt(np.abs(Sx) ** 2 + np.abs(Sy) ** 2 + np.abs(Sz) ** 2))
+
+
+def _poynting_db(ff) -> tuple[float, float]:
+    """
+    Return ``(db, |S|)``.
+
+    Absolute |S| from a short DFT is often ≪ 1e-30; do **not** clamp to 1e-30
+    before ``log10`` — that flattens every angle to −600 dB and destroys the
+    peak-normalized polar pattern. Callers should peak-normalize for display.
+    """
+    mag = _poynting_mag(ff)
+    if not np.isfinite(mag) or mag <= 0.0:
+        return float("-inf"), 0.0
+    return float(20.0 * np.log10(mag)), mag
