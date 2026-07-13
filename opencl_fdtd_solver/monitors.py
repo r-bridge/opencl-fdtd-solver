@@ -146,19 +146,17 @@ class Near2FarBase:
                 Lx_int += np.sum(M_x * phase_factor) * dA
                 Ly_int += np.sum(M_y * phase_factor) * dA
 
-        prefactor = -1j * k / (4.0 * np.pi * r) * np.exp(1j * k * r)
+        prefactor = -1j * k / (4.0 * np.pi * r) * np.exp(-1j * k * r)
         N = np.array([Nx_int, Ny_int, Nz_int])
         L = np.array([Lx_int, Ly_int, Lz_int])
         rhat = np.array([rx, ry, rz])
 
-        rxN = np.cross(rhat, N)
         rxL = np.cross(rhat, L)
-
         N_t = N - np.dot(rhat, N) * rhat
-        L_t = L - np.dot(rhat, L) * rhat
 
-        E_far = prefactor * (L_t + ETA0 * rxN)
-        H_far = prefactor * (N_t - rxL / ETA0)
+        # E ∝ η N_⊥ + r̂×L   (Balanis / Taflove far-field equivalence)
+        E_far = prefactor * (ETA0 * N_t + rxL)
+        H_far = -np.cross(rhat, E_far) / ETA0
 
         return np.array([
             E_far[0], E_far[1], E_far[2],
