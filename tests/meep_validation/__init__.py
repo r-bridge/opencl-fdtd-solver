@@ -7,11 +7,14 @@
 
 from .harness import (  # noqa: F401
     C0,
+    EPS0,
+    OPENCL_COURANT,
     MeepUnavailableError,
     complex_align,
     ensure_pyopencl_ctx,
     gaussian_sine_amp,
     max_abs_db_error,
+    meep_jx_from_si,
     meep_until,
     opencl_dt,
     parse_meep_json,

@@ -18,6 +18,42 @@ from typing import Any
 import numpy as np
 
 C0 = 299_792_458.0
+MU0 = 4e-7 * np.pi
+EPS0 = 1.0 / (MU0 * C0**2)
+# Match OpenCLFDTD: dt = S * dl / c with S = 0.99/sqrt(3). Meep default is 0.5.
+OPENCL_COURANT = 0.99 / float(np.sqrt(3.0))
+# Length unit used in Meep comparison scripts (metres per Meep length unit).
+MEEP_LENGTH_M = 1e-3
+
+
+def meep_jx_from_si(
+    j_si: float,
+    *,
+    length_unit_m: float = MEEP_LENGTH_M,
+    resolution: float | None = None,
+    dl_meep: float | None = None,
+) -> float:
+    """Map SI current density so Meep ΔE matches SI ΔE numerically.
+
+    Meep (ε₀≡1): ``ΔE = -J_meep·Δt_meep / εᵣ``.
+    SI: ``ΔE = -J_si·Δt_si / (ε₀ εᵣ)`` with ``Δt_si = Δt_meep·(length_unit_m/c)``.
+
+    Therefore raw ``J_meep = J_si · length_unit_m / (ε₀ c)``.
+
+    For a **planar** (zero-thickness) volume source Meep additionally multiplies
+    the stored amplitude by ``gv.a`` (= ``resolution``) so the δ-function current
+    retains resolution-independent ∫J. Pass ``resolution`` (or ``dl_meep =
+    1/resolution``) to cancel that factor when matching per-cell ΔE to SI Jx on
+    a Yee sheet.
+    """
+    if resolution is not None and dl_meep is not None:
+        raise ValueError("pass only one of resolution or dl_meep")
+    j = float(j_si) * float(length_unit_m) / (float(EPS0) * C0)
+    if resolution is not None:
+        j /= float(resolution)
+    elif dl_meep is not None:
+        j *= float(dl_meep)
+    return j
 
 
 class MeepUnavailableError(RuntimeError):
@@ -25,12 +61,12 @@ class MeepUnavailableError(RuntimeError):
 
 
 def opencl_dt(dl: float) -> float:
-    return 0.99 * dl / (C0 * np.sqrt(3.0))
+    return float(OPENCL_COURANT) * float(dl) / C0
 
 
 def meep_until(n_steps: int, dl: float) -> float:
     """Physical OpenCL runtime in Meep units with length unit = 1 mm."""
-    return float(n_steps * 0.99 / np.sqrt(3.0) * (dl / 1e-3))
+    return float(n_steps) * float(OPENCL_COURANT) * (float(dl) / 1e-3)
 
 
 def gaussian_sine_amp(t: float, freq: float, fwidth: float) -> float:
