@@ -19,6 +19,7 @@ from tests.meep_validation.harness import MeepUnavailableError, OPENCL_COURANT
 from tests.meep_validation.plane_cases import (
     baselines_root,
     default_plane_cases,
+    load_case_planes_from_baselines,
     run_case_planes,
 )
 from tests.meep_validation.plane_metrics import (
@@ -135,20 +136,46 @@ class TestMeepPlaneBaselines(unittest.TestCase):
                         )
 
     def test_discrepancy_report_matches_committed(self):
-        """Live discrepancy JSON/Markdown must equal committed report files."""
+        """Committed report must match a fresh measure of the committed planes.
+
+        Uses on-disk OpenCL/Meep arrays (not a live re-solve) so report identity
+        is independent of OpenCL backend ULP noise (NVIDIA vs POCL).
+        """
         root = baselines_root()
-        live = _live_discrepancy_doc(self.planes)
+        case_docs = []
+        for case in default_plane_cases():
+            ocl, meep = load_case_planes_from_baselines(
+                root / case.name, case.checkpoints
+            )
+            rows = measure_case(ocl, meep, npml=case.npml, checkpoints=case.checkpoints)
+            case_docs.append(
+                case_report_dict(
+                    name=case.name,
+                    shape=list(case.shape),
+                    dl_m=case.dl,
+                    npml=case.npml,
+                    n_steps=case.n_steps,
+                    freq_hz=case.freq,
+                    fwidth_hz=case.fwidth,
+                    block_half=list(case.block_half),
+                    block_eps=case.block_eps,
+                    courant=float(OPENCL_COURANT),
+                    rows=rows,
+                    images=[f"step_{s:04d}.png" for s in case.checkpoints],
+                )
+            )
+        rebuilt = build_discrepancy_document(case_docs)
         expected = json.loads(
             (root / "discrepancy_report.json").read_text(encoding="utf-8")
         )
         self.assertEqual(
-            live,
+            rebuilt,
             expected,
-            "discrepancy_report.json is stale or metrics drifted. Refresh with "
+            "discrepancy_report.json is stale vs committed planes. Refresh with "
             "update_plane_baselines.",
         )
         expected_md = (root / "DISCREPANCY_REPORT.md").read_text(encoding="utf-8")
-        live_md = discrepancy_markdown(live)
+        live_md = discrepancy_markdown(rebuilt)
         self.assertEqual(
             live_md,
             expected_md,

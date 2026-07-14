@@ -1,6 +1,6 @@
 # OpenCL ↔ Meep mid-plane Ex discrepancy report
 
-Objective comparison of mid-plane Ex between this OpenCL Yee/CPML solver and Meep on shared abstract cases (soft Ex sheet, matched Courant, sheet trimmed out of PML). Metrics use the non-PML mask.
+Objective comparison of mid-plane Ex between this OpenCL Yee/CPML solver and Meep on shared abstract cases (SI Jx sheet, matched Courant, sheet trimmed out of PML). Metrics use the non-PML mask.
 
 ## Metric definitions
 
@@ -27,10 +27,10 @@ Objective comparison of mid-plane Ex between this OpenCL Yee/CPML solver and Mee
 
 | step | corr | LMS scale | raw res/E | aligned res/E | peak_ocl | peak_meep | peak ratio | lag |
 |-----:|-----:|----------:|----------:|--------------:|---------:|----------:|-----------:|----:|
-| 20 | 0.971749 | 1.047185 | 0.042620 | 0.040672 | 2.885542e-05 | 1.384040e-05 | 2.084868 | 0 |
-| 40 | 0.983059 | 1.008061 | 0.026050 | 0.025988 | 9.727498e-05 | 5.098902e-05 | 1.907763 | 0 |
-| 60 | 0.970644 | 0.992185 | 0.046313 | 0.046254 | 3.887754e-04 | 2.080979e-04 | 1.868233 | 0 |
-| 80 | 0.949444 | 0.954041 | 0.082828 | 0.080695 | 1.266639e-03 | 7.142974e-04 | 1.773266 | 1 |
+| 20 | 0.971749 | 1.047185 | 0.042620 | 0.040672 | 1.553362e-05 | 7.450646e-06 | 2.084868 | 0 |
+| 40 | 0.983059 | 1.008061 | 0.026050 | 0.025988 | 5.236563e-05 | 2.744870e-05 | 1.907763 | 0 |
+| 60 | 0.970644 | 0.992185 | 0.046313 | 0.046254 | 2.092878e-04 | 1.120245e-04 | 1.868233 | 0 |
+| 80 | 0.949444 | 0.954041 | 0.082828 | 0.080695 | 6.818647e-04 | 3.845247e-04 | 1.773266 | 1 |
 
 ### Images
 
@@ -55,10 +55,10 @@ Objective comparison of mid-plane Ex between this OpenCL Yee/CPML solver and Mee
 
 | step | corr | LMS scale | raw res/E | aligned res/E | peak_ocl | peak_meep | peak ratio | lag |
 |-----:|-----:|----------:|----------:|--------------:|---------:|----------:|-----------:|----:|
-| 20 | 0.971641 | 1.047221 | 0.043001 | 0.041051 | 2.885542e-05 | 1.384040e-05 | 2.084868 | 0 |
-| 40 | 0.981889 | 1.004805 | 0.027374 | 0.027352 | 9.733730e-05 | 5.106649e-05 | 1.906089 | 0 |
-| 60 | 0.971282 | 0.996561 | 0.043544 | 0.043532 | 3.895528e-04 | 2.090992e-04 | 1.863005 | 0 |
-| 80 | 0.954301 | 0.967829 | 0.070199 | 0.069171 | 1.269293e-03 | 7.185120e-04 | 1.766557 | 1 |
+| 20 | 0.971641 | 1.047221 | 0.043001 | 0.041051 | 1.553362e-05 | 7.450646e-06 | 2.084868 | 0 |
+| 40 | 0.981889 | 1.004805 | 0.027374 | 0.027352 | 5.239918e-05 | 2.749041e-05 | 1.906089 | 0 |
+| 60 | 0.971282 | 0.996561 | 0.043544 | 0.043532 | 2.097063e-04 | 1.125635e-04 | 1.863005 | 0 |
+| 80 | 0.954301 | 0.967829 | 0.070199 | 0.069171 | 6.832929e-04 | 3.867935e-04 | 1.766558 | 1 |
 
 ### Images
 
