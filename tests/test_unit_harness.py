@@ -14,10 +14,13 @@ import unittest
 import numpy as np
 
 from tests.meep_validation.harness import (
+    C0,
+    EPS0,
     complex_align,
     ensure_pyopencl_ctx,
     gaussian_sine_amp,
     max_abs_db_error,
+    meep_jx_from_si,
     meep_until,
     opencl_dt,
     parse_meep_json,
@@ -32,6 +35,26 @@ class TestHarnessMath(unittest.TestCase):
         dl = 2e-3
         self.assertGreater(opencl_dt(dl), 0.0)
         self.assertAlmostEqual(meep_until(100, dl), 100 * 0.99 / np.sqrt(3.0) * 2.0, places=10)
+
+    def test_meep_jx_from_si_unit_conversion(self):
+        # Raw: J_meep = J_si * (1 mm) / (ε₀ c) so ΔE matches when E is compared numerically.
+        self.assertAlmostEqual(meep_jx_from_si(1.0), 1e-3 / (EPS0 * C0), places=12)
+        self.assertAlmostEqual(meep_jx_from_si(2.0, length_unit_m=1.0), 2.0 / (EPS0 * C0), places=12)
+        # Planar Meep sources store amp *= resolution; cancel for sheet ΔE match.
+        dl_mm = 2.5
+        res = 1.0 / dl_mm
+        self.assertAlmostEqual(
+            meep_jx_from_si(1.0, resolution=res),
+            1e-3 / (EPS0 * C0) / res,
+            places=12,
+        )
+        self.assertAlmostEqual(
+            meep_jx_from_si(1.0, dl_meep=dl_mm),
+            meep_jx_from_si(1.0, resolution=res),
+            places=12,
+        )
+        with self.assertRaises(ValueError):
+            meep_jx_from_si(1.0, resolution=1.0, dl_meep=1.0)
 
     def test_gaussian_sine_amp_peakish(self):
         freq = 5e9

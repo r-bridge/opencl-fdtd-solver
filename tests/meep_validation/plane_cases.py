@@ -6,7 +6,7 @@
 """Generic OpenCL ↔ Meep mid-plane Ex cases (no application-specific geometry).
 
 Each case exercises features used by typical 3D FDTD workflows:
-vacuum or a simple dielectric block, CPML, soft Ex sheet (trimmed out of PML),
+vacuum or a simple dielectric block, CPML, SI Jx sheet (trimmed out of PML),
 matched Courant, and mid-plane Ex sampling at fixed checkpoints.
 """
 
@@ -27,6 +27,7 @@ from .harness import (
     OPENCL_COURANT,
     ensure_pyopencl_ctx,
     gaussian_sine_amp,
+    meep_jx_from_si,
     meep_until,
 )
 from .plane_render import write_triptych_png
@@ -122,7 +123,7 @@ def run_opencl_planes(case: PlaneCase) -> dict[int, np.ndarray]:
     fdtd.set_epsilon(_make_eps(case))
 
     def source_cb(f):
-        f.add_source_Ex(
+        f.add_source_Jx(
             z_src,
             gaussian_sine_amp(f.t, case.freq, case.fwidth),
             i0=p,
@@ -155,7 +156,9 @@ def _meep_script(case: PlaneCase, out_rel: str = ".") -> str:
     pad = 2.0 * npml * dl_mm
     src_sx = max(dl_mm, Lx - pad)
     src_sy = max(dl_mm, Ly - pad)
-    j_scale = 1.0 / float(OPENCL_COURANT)
+    # Same SI Jx waveform as OpenCL; convert so Meep ΔE ≈ SI ΔE (ε₀≡1 in Meep),
+    # including Meep's planar δ-source × resolution factor.
+    j_unit = meep_jx_from_si(1.0, resolution=1.0 / dl_mm)
     hx, hy, hz = case.block_half
     block_mm = (
         (2 * hx + 1) * dl_mm,
@@ -214,13 +217,14 @@ freq_hz = {case.freq!r}
 fwidth_hz = {case.fwidth!r}
 t0 = 5.0 / (np.pi * fwidth_hz)
 sigma = 1.0 / (np.pi * fwidth_hz)
-j_scale = {j_scale!r}
+# J_meep includes /resolution so Meep's planar δ × gv.a cancels for per-cell ΔE.
+j_unit = {j_unit!r}
 c0 = {C0!r}
 
 def my_src_func(t):
     t_sec = float(t) * 1e-3 / c0
-    amp = np.exp(-0.5 * ((t_sec - t0) / sigma) ** 2) * np.sin(2 * np.pi * freq_hz * t_sec)
-    return -float(amp) * j_scale
+    j_si = np.exp(-0.5 * ((t_sec - t0) / sigma) ** 2) * np.sin(2 * np.pi * freq_hz * t_sec)
+    return float(j_si) * j_unit
 
 sources = [
     mp.Source(
@@ -351,6 +355,7 @@ def write_case_baselines(
         "block_half": list(case.block_half),
         "block_eps": case.block_eps,
         "courant": float(OPENCL_COURANT),
+        "source": "Jx",
         "files": [],
         "discrepancy": {
             "summary": case_summary(rows),

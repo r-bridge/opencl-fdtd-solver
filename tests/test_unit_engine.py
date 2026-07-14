@@ -98,6 +98,32 @@ class TestOpenCLEngineBasics(unittest.TestCase):
         self.assertTrue(np.all(np.isfinite(ex)))
         self.assertGreater(float(np.max(np.abs(ex))), 0.0)
 
+    def test_add_source_jx_matches_soft_delta_e(self):
+        """Jx inject equals Ex soft-add of -dt/(ε₀ εᵣ) J on the sheet."""
+        from opencl_fdtd_solver.engine import EPS0
+
+        shape = (16, 16, 16)
+        dl = 1e-3
+        npml = 2
+        z = 8
+        Jx = 0.25
+        p = npml
+        fdtd = OpenCLFDTD(shape, dl, npml=npml)
+        eps = np.ones(shape, dtype=np.float32)
+        eps[8, 8, z] = 4.0
+        fdtd.set_epsilon(eps)
+        fdtd._sources.append(
+            lambda f: f.add_source_Jx(z, Jx, i0=p, i1=shape[0] - p, j0=p, j1=shape[1] - p)
+        )
+        fdtd.step()
+        fdtd.queue.finish()
+        ex = fdtd.Ex
+        soft_eps4 = -float(fdtd.dt) / (float(EPS0) * 4.0) * Jx
+        soft_vac = -float(fdtd.dt) / float(EPS0) * Jx
+        self.assertAlmostEqual(float(ex[8, 8, z]), soft_eps4, places=6)
+        self.assertAlmostEqual(float(ex[p, p, z]), soft_vac, places=6)
+        self.assertEqual(float(ex[0, 0, z]), 0.0)  # outside sheet (in PML)
+
     def test_memory_error_when_over_budget(self):
         tiny = mock.Mock()
         tiny.global_mem_size = 64 * 1024 * 1024  # 64 MiB

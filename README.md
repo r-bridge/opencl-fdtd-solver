@@ -83,7 +83,7 @@ CI regenerates generic side-by-side mid-plane Ex triptychs (`OpenCL | Meep | res
 - [`DISCREPANCY_REPORT.md`](tests/meep_validation/baselines/DISCREPANCY_REPORT.md) (human-readable metrics for repository viewers)
 - `discrepancy_report.json` (exact JSON enforced by CI)
 
-Cases are abstract (`vacuum_sheet`, `dielectric_block`) — matched Courant, soft Ex sheet trimmed out of PML, CPML. Quality gates also fail if mean Pearson correlation, LMS scale, or residual energy worsen beyond fixed floors.
+Cases are abstract (`vacuum_sheet`, `dielectric_block`) — matched Courant, SI `Jx` sheet (`Ex += −dt/(ε₀εᵣ)J`, trimmed out of PML), CPML. Quality gates also fail if mean Pearson correlation, LMS scale, or residual energy worsen beyond fixed floors.
 
 ```bash
 # Refresh all committed images, planes, and reports (use POCL/CPU so CI matches):
@@ -123,8 +123,8 @@ Measured on NVIDIA GeForce RTX 5080 (15.92 GB reported), AMD Ryzen 9 7945HX, fie
 
 | Case | Grid | OpenCL | MEEP CPU | Speedup |
 |---|---:|---:|---:|---:|
-| Relative (matched) | 400³ × 100 steps | ~8160 MCUPS | ~49 MCUPS | **~166×** |
-| Sustained OpenCL | 600³ × 100 steps | ~8740 MCUPS | — | — |
-| Near-capacity OpenCL | 750³ × 80 steps | ~8480 MCUPS | — | — |
+| Relative (matched) | 400³ × 100 steps | ~7970 MCUPS | ~82 MCUPS | **~97×** |
+| Sustained OpenCL | 600³ × 100 steps | ~8630 MCUPS | — | — |
+| Near-capacity OpenCL | 750³ × 80 steps | ~9430 MCUPS | — | — |
 
 Near-to-far uses a **single fused tangential face-DFT kernel** per step (not one launch per field×face). On a 200³ smoke test with a large Huygens box, sustained rates stay near field-only (~7.3k vs ~7.4k MCUPS). Absolute MCUPS still depends on free VRAM — trust local runs over the table.

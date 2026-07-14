@@ -149,7 +149,7 @@ def build_discrepancy_document(
         "title": "OpenCL ↔ Meep mid-plane Ex discrepancy report",
         "description": (
             "Objective comparison of mid-plane Ex between this OpenCL Yee/CPML "
-            "solver and Meep on shared abstract cases (soft Ex sheet, matched "
+            "solver and Meep on shared abstract cases (SI Jx sheet, matched "
             "Courant, sheet trimmed out of PML). Metrics use the non-PML mask."
         ),
         "metric_definitions": {
@@ -210,7 +210,7 @@ def discrepancy_markdown(doc: dict[str, Any]) -> str:
                 "",
                 "### Summary",
                 "",
-                f"| mean corr | mean LMS scale | mean raw res/E | mean aligned res/E | max \|lag\| |",
+                f"| mean corr | mean LMS scale | mean raw res/E | mean aligned res/E | max \\|lag\\| |",
                 f"|----------:|---------------:|---------------:|-------------------:|----------:|",
             ]
         )
