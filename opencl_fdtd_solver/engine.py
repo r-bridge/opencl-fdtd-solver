@@ -499,12 +499,14 @@ class OpenCLFDTD:
         __kernel void add_source_Ex(
             int Nx, int Ny, int Nz,
             int z_src, float amp,
+            int i0, int i1, int j0, int j1,
             __global float *Ex
         ) {
             int j = get_global_id(0);
             int i = get_global_id(1);
 
             if (i >= Nx || j >= Ny) return;
+            if (i < i0 || i >= i1 || j < j0 || j >= j1) return;
 
             int idx = i * Ny * Nz + j * Nz + z_src;
             Ex[idx] += amp;
@@ -954,14 +956,24 @@ class OpenCLFDTD:
         nz_i = self.Nz - 2 * n
         self._gs_interior = (nz_i, ny_i, nx_i) if (nx_i > 0 and ny_i > 0 and nz_i > 0) else None
 
-    def add_source_Ex(self, z_src, amp):
-        """Adds a sheet source value directly on the GPU using a kernel."""
+    def add_source_Ex(self, z_src, amp, i0=None, i1=None, j0=None, j1=None):
+        """Adds a sheet source value directly on the GPU using a kernel.
+
+        Optional half-open index ranges ``[i0, i1)`` / ``[j0, j1)`` limit the
+        sheet (default: full XY, including PML). Use interior-only bounds when
+        matching Meep sources that stop at the PML.
+        """
+        i0_i = 0 if i0 is None else int(i0)
+        i1_i = self.Nx if i1 is None else int(i1)
+        j0_i = 0 if j0 is None else int(j0)
+        j1_i = self.Ny if j1 is None else int(j1)
         self.kern_add_source_Ex(
             self.queue,
             (self.Ny, self.Nx),
             None,
             np.int32(self.Nx), np.int32(self.Ny), np.int32(self.Nz),
             np.int32(z_src), np.float32(amp),
+            np.int32(i0_i), np.int32(i1_i), np.int32(j0_i), np.int32(j1_i),
             self.Ex_buf
         )
 

@@ -24,6 +24,8 @@ SUITES = [
     "tests.test_unit_engine",
     "tests.test_unit_monitors",
     "tests.test_unit_harness",
+    "tests.test_unit_plane_render",
+    "tests.test_unit_plane_metrics",
 ]
 
 
