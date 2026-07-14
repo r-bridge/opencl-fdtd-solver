@@ -1,0 +1,27 @@
+{
+  "courant": 0.5715767664977295,
+  "discrepancy": {
+    "main_lobe_max_abs_db_error": 2.8404971,
+    "meep_null_ratio": 6.2177041e-06,
+    "opencl_null_ratio": 0.035692917
+  },
+  "dl_m": 0.002,
+  "files": [
+    "pattern_xz.png"
+  ],
+  "freq_hz": 5000000000.0,
+  "fwidth_hz": 1000000000.0,
+  "max_main_lobe_db": 3.0,
+  "n_angles": 19,
+  "n_steps": 500,
+  "name": "dielectric_sphere_farfield",
+  "npml": 6,
+  "shape": [
+    30,
+    30,
+    30
+  ],
+  "source": "soft_Ex_compact_patch",
+  "sphere_eps": 4.0,
+  "sphere_rad_cells": 6
+}
