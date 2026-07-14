@@ -156,7 +156,20 @@ class TestNumPyEngine(unittest.TestCase):
 
 
 class TestDeviceSelectionFallbacks(unittest.TestCase):
+    def tearDown(self):
+        import opencl_fdtd_solver.engine as eng
+
+        eng._DEFAULT_CTX = None
+        eng._DEFAULT_QUEUE = None
+        eng._DEFAULT_DEVICE = None
+
     def test_prefers_gpu_then_cpu(self):
+        import opencl_fdtd_solver.engine as eng
+
+        eng._DEFAULT_CTX = None
+        eng._DEFAULT_QUEUE = None
+        eng._DEFAULT_DEVICE = None
+
         gpu = mock.Mock()
         gpu.name = "FakeGPU"
         gpu.type = cl.device_type.GPU
@@ -168,7 +181,9 @@ class TestDeviceSelectionFallbacks(unittest.TestCase):
         cpu.global_mem_size = 8 * 1024 ** 3
 
         plat = mock.Mock()
-        plat.get_devices = mock.Mock(side_effect=lambda dtype=None: [gpu] if dtype == cl.device_type.GPU else [cpu])
+        plat.get_devices = mock.Mock(
+            side_effect=lambda dtype=None: [gpu] if dtype == cl.device_type.GPU else [cpu]
+        )
 
         fake_ctx = mock.Mock()
         fake_ctx.devices = [gpu]
@@ -186,6 +201,7 @@ class TestDeviceSelectionFallbacks(unittest.TestCase):
 
         ctx_ctor.assert_called_once()
         self.assertIs(fdtd.device, gpu)
+        self.assertIs(eng._DEFAULT_DEVICE, gpu)
 
 
 if __name__ == "__main__":

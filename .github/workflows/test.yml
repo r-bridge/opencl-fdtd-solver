@@ -12,10 +12,10 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
 
@@ -31,8 +31,12 @@ jobs:
         pip install -e .
 
     - name: Run unit tests with coverage
+      env:
+        PYOPENCL_CTX: "0"
+        # Reduce POCL workers; multi-context teardown is flaky under coverage.
+        POCL_MAX_PTHREAD_COUNT: "1"
       run: |
-        export PYOPENCL_CTX=0
+        set -euo pipefail
         python -m coverage run -m unittest \
           tests.test_solver \
           tests.test_unit_engine \
@@ -43,6 +47,7 @@ jobs:
         python -m coverage xml
 
     - name: Run MEEP Feature Validation (Docker)
+      env:
+        PYOPENCL_CTX: "0"
       run: |
-        export PYOPENCL_CTX=0
         python -m unittest tests.test_meep_validation -v
