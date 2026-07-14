@@ -3,12 +3,13 @@
 Abstract cases only — no application-specific geometry.
 
 Sources use SI current density `Jx` on both sides (`OpenCLFDTD.add_source_Jx` →
-`Ex += −dt/(ε₀εᵣ)J`; Meep `CustomSource` is `J` with
-`meep_jx_from_si(..., resolution=...)` so Meep’s planar δ × `gv.a` cancels).
+`Ex += −dt/(ε₀εᵣ)J` with Meep-tuned rim taper `rim_edge=0.8` + ∫J renorm;
+Meep `CustomSource` is `J` with `meep_jx_from_si(..., resolution=...)` so Meep’s
+planar δ × `gv.a` cancels).
 
 | Case | Features exercised |
 |------|--------------------|
-| `vacuum_sheet` | SI Jx sheet (PML-trimmed), CPML, matched Courant, mid-plane Ex |
+| `vacuum_sheet` | SI Jx sheet + rim taper (PML-trimmed), CPML, matched Courant, mid-plane Ex |
 | `dielectric_block` | Same + centered ε=4 rectangular block |
 
 **Human / machine discrepancy evidence** (CI-enforced):

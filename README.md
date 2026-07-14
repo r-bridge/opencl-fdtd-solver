@@ -83,7 +83,7 @@ CI regenerates generic side-by-side mid-plane Ex triptychs (`OpenCL | Meep | res
 - [`DISCREPANCY_REPORT.md`](tests/meep_validation/baselines/DISCREPANCY_REPORT.md) (human-readable metrics for repository viewers)
 - `discrepancy_report.json` (exact JSON enforced by CI)
 
-Cases are abstract (`vacuum_sheet`, `dielectric_block`) — matched Courant, SI `Jx` sheet (`Ex += −dt/(ε₀εᵣ)J`, trimmed out of PML), CPML. Quality gates also fail if mean Pearson correlation, LMS scale, or residual energy worsen beyond fixed floors.
+Cases are abstract (`vacuum_sheet`, `dielectric_block`) — matched Courant, SI `Jx` sheet with Meep-matched rim taper (`Ex += −dt/(ε₀εᵣ)J`, trimmed out of PML), CPML. Quality gates also fail if mean Pearson correlation, LMS scale, or residual energy worsen beyond fixed floors.
 
 ```bash
 # Refresh all committed images, planes, and reports (use POCL/CPU so CI matches):

@@ -1,6 +1,6 @@
 # OpenCL ↔ Meep mid-plane Ex discrepancy report
 
-Objective comparison of mid-plane Ex between this OpenCL Yee/CPML solver and Meep on shared abstract cases (SI Jx sheet, matched Courant, sheet trimmed out of PML). Metrics use the non-PML mask.
+Objective comparison of mid-plane Ex between this OpenCL Yee/CPML solver and Meep on shared abstract cases (SI Jx sheet with rim taper, matched Courant, sheet trimmed out of PML). Metrics use the non-PML mask.
 
 ## Metric definitions
 
@@ -21,16 +21,16 @@ Objective comparison of mid-plane Ex between this OpenCL Yee/CPML solver and Mee
 
 | mean corr | mean LMS scale | mean raw res/E | mean aligned res/E | max \|lag\| |
 |----------:|---------------:|---------------:|-------------------:|----------:|
-| 0.968724 | 1.000368 | 0.049453 | 0.048402 | 1 |
+| 0.978587 | 1.006145 | 0.034095 | 0.033289 | 1 |
 
 ### Checkpoints
 
 | step | corr | LMS scale | raw res/E | aligned res/E | peak_ocl | peak_meep | peak ratio | lag |
 |-----:|-----:|----------:|----------:|--------------:|---------:|----------:|-----------:|----:|
-| 20 | 0.971749 | 1.047185 | 0.042620 | 0.040672 | 1.553362e-05 | 7.450646e-06 | 2.084868 | 0 |
-| 40 | 0.983059 | 1.008061 | 0.026050 | 0.025988 | 5.236563e-05 | 2.744870e-05 | 1.907763 | 0 |
-| 60 | 0.970644 | 0.992185 | 0.046313 | 0.046254 | 2.092878e-04 | 1.120245e-04 | 1.868233 | 0 |
-| 80 | 0.949444 | 0.954041 | 0.082828 | 0.080695 | 6.818647e-04 | 3.845247e-04 | 1.773266 | 1 |
+| 20 | 0.988962 | 1.044069 | 0.017430 | 0.015676 | 9.987610e-06 | 7.450646e-06 | 1.340502 | 0 |
+| 40 | 0.992396 | 1.015346 | 0.011852 | 0.011626 | 3.496311e-05 | 2.744870e-05 | 1.273762 | 0 |
+| 60 | 0.978308 | 1.000490 | 0.033978 | 0.033978 | 1.419041e-04 | 1.120245e-04 | 1.266723 | 0 |
+| 80 | 0.954683 | 0.964676 | 0.073120 | 0.071875 | 4.710418e-04 | 3.845247e-04 | 1.224998 | 1 |
 
 ### Images
 
@@ -49,16 +49,16 @@ Objective comparison of mid-plane Ex between this OpenCL Yee/CPML solver and Mee
 
 | mean corr | mean LMS scale | mean raw res/E | mean aligned res/E | max \|lag\| |
 |----------:|---------------:|---------------:|-------------------:|----------:|
-| 0.969778 | 1.004104 | 0.046030 | 0.045277 | 1 |
+| 0.979517 | 1.009896 | 0.031212 | 0.030622 | 1 |
 
 ### Checkpoints
 
 | step | corr | LMS scale | raw res/E | aligned res/E | peak_ocl | peak_meep | peak ratio | lag |
 |-----:|-----:|----------:|----------:|--------------:|---------:|----------:|-----------:|----:|
-| 20 | 0.971641 | 1.047221 | 0.043001 | 0.041051 | 1.553362e-05 | 7.450646e-06 | 2.084868 | 0 |
-| 40 | 0.981889 | 1.004805 | 0.027374 | 0.027352 | 5.239918e-05 | 2.749041e-05 | 1.906089 | 0 |
-| 60 | 0.971282 | 0.996561 | 0.043544 | 0.043532 | 2.097063e-04 | 1.125635e-04 | 1.863005 | 0 |
-| 80 | 0.954301 | 0.967829 | 0.070199 | 0.069171 | 6.832929e-04 | 3.867935e-04 | 1.766558 | 1 |
+| 20 | 0.988773 | 1.044010 | 0.017786 | 0.016037 | 9.987610e-06 | 7.450646e-06 | 1.340502 | 0 |
+| 40 | 0.991205 | 1.012096 | 0.013415 | 0.013274 | 3.499759e-05 | 2.749041e-05 | 1.273084 | 0 |
+| 60 | 0.978830 | 1.004891 | 0.031935 | 0.031912 | 1.423327e-04 | 1.125635e-04 | 1.264466 | 0 |
+| 80 | 0.959260 | 0.978586 | 0.061714 | 0.061265 | 4.725061e-04 | 3.867935e-04 | 1.221598 | 1 |
 
 ### Images
 
