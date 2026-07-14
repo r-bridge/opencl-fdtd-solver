@@ -98,6 +98,68 @@ class TestOpenCLEngineBasics(unittest.TestCase):
         self.assertTrue(np.all(np.isfinite(ex)))
         self.assertGreater(float(np.max(np.abs(ex))), 0.0)
 
+    def test_add_source_jx_matches_soft_delta_e(self):
+        """Jx inject equals Ex soft-add of -dt/(ε₀ εᵣ) J on the sheet."""
+        from opencl_fdtd_solver.engine import EPS0
+
+        shape = (16, 16, 16)
+        dl = 1e-3
+        npml = 2
+        z = 8
+        Jx = 0.25
+        p = npml
+        fdtd = OpenCLFDTD(shape, dl, npml=npml)
+        eps = np.ones(shape, dtype=np.float32)
+        eps[8, 8, z] = 4.0
+        fdtd.set_epsilon(eps)
+        fdtd._sources.append(
+            lambda f: f.add_source_Jx(z, Jx, i0=p, i1=shape[0] - p, j0=p, j1=shape[1] - p)
+        )
+        fdtd.step()
+        fdtd.queue.finish()
+        ex = fdtd.Ex
+        soft_eps4 = -float(fdtd.dt) / (float(EPS0) * 4.0) * Jx
+        soft_vac = -float(fdtd.dt) / float(EPS0) * Jx
+        self.assertAlmostEqual(float(ex[8, 8, z]), soft_eps4, places=6)
+        self.assertAlmostEqual(float(ex[p, p, z]), soft_vac, places=6)
+        self.assertEqual(float(ex[0, 0, z]), 0.0)  # outside sheet (in PML)
+
+    def test_add_source_jx_rim_taper_weights(self):
+        """Rim taper: interior=1, edge=rim_edge, corner=rim_edge² (no renorm)."""
+        from opencl_fdtd_solver.engine import EPS0
+
+        shape = (16, 16, 16)
+        npml = 2
+        z = 8
+        Jx = 1.0
+        ew = 0.5
+        p = npml
+        i1 = shape[0] - p
+        j1 = shape[1] - p
+        fdtd = OpenCLFDTD(shape, 1e-3, npml=npml)
+        fdtd._sources.append(
+            lambda f: f.add_source_Jx(
+                z,
+                Jx,
+                i0=p,
+                i1=i1,
+                j0=p,
+                j1=j1,
+                rim_taper=True,
+                rim_edge=ew,
+                rim_renorm=False,
+            )
+        )
+        fdtd.step()
+        fdtd.queue.finish()
+        ex = fdtd.Ex
+        base = -float(fdtd.dt) / float(EPS0) * Jx
+        self.assertAlmostEqual(float(ex[p + 2, p + 2, z]), base, places=6)  # interior
+        self.assertAlmostEqual(float(ex[p, p + 2, z]), ew * base, places=6)  # x-edge
+        self.assertAlmostEqual(float(ex[p + 2, p, z]), ew * base, places=6)  # y-edge
+        self.assertAlmostEqual(float(ex[p, p, z]), ew * ew * base, places=6)  # corner
+        self.assertAlmostEqual(float(ex[i1 - 1, j1 - 1, z]), ew * ew * base, places=6)
+
     def test_memory_error_when_over_budget(self):
         tiny = mock.Mock()
         tiny.global_mem_size = 64 * 1024 * 1024  # 64 MiB
