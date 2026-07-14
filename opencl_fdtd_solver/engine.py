@@ -512,12 +512,16 @@ class OpenCLFDTD:
             Ex[idx] += amp;
         }
 
-        /* Soft current-density inject: Ex += -dt/(ε₀ εᵣ) Jx (Meep-like D -= J·dt). */
+        /* Soft current-density inject: Ex += -dt/(ε₀ εᵣ) Jx (Meep-like D -= J·dt).
+         * rim_taper≠0 multiplies by sheet rim weights: edges × rim_edge, corners
+         * × rim_edge² (host may renorm J so ∑w equals the hard cell count). */
         __kernel void add_source_Jx(
             int Nx, int Ny, int Nz,
             int z_src, float Jx,
             float dt, float eps0,
             int i0, int i1, int j0, int j1,
+            int rim_taper,
+            float rim_edge,
             __global const float *eps_r,
             __global float *Ex
         ) {
@@ -527,8 +531,14 @@ class OpenCLFDTD:
             if (i >= Nx || j >= Ny) return;
             if (i < i0 || i >= i1 || j < j0 || j >= j1) return;
 
+            float w = 1.0f;
+            if (rim_taper) {
+                if (i == i0 || i == i1 - 1) w *= rim_edge;
+                if (j == j0 || j == j1 - 1) w *= rim_edge;
+            }
+
             int idx = i * Ny * Nz + j * Nz + z_src;
-            Ex[idx] += -(dt / (eps0 * eps_r[idx])) * Jx;
+            Ex[idx] += -(dt / (eps0 * eps_r[idx])) * Jx * w;
         }
 
         /* Legacy full-box DFT (volume buffer); prefer accumulate_dft_face. */
@@ -999,26 +1009,55 @@ class OpenCLFDTD:
             self.Ex_buf
         )
 
-    def add_source_Jx(self, z_src, Jx, i0=None, i1=None, j0=None, j1=None):
+    def add_source_Jx(
+        self,
+        z_src,
+        Jx,
+        i0=None,
+        i1=None,
+        j0=None,
+        j1=None,
+        *,
+        rim_taper=False,
+        rim_edge=0.8,
+        rim_renorm=True,
+    ):
         """Inject SI current density ``Jx`` (A/m²) on a constant-z Ex sheet.
 
         Applies ``Ex += -dt/(ε₀ εᵣ) Jx`` using the on-device ε buffer, matching
         Meep's ``D -= J·dt`` then ``E = χ⁻¹ D`` (with SI ε₀ restored).
 
         Optional half-open ``[i0, i1)`` / ``[j0, j1)`` sheet bounds (default: full XY).
+
+        If ``rim_taper`` is true, multiplies by sheet rim weights (edges ×
+        ``rim_edge``, corners × ``rim_edge²``). Default ``rim_edge=0.8`` was
+        tuned against Meep continuous volume-source restriction on the mid-plane
+        cases. With ``rim_renorm`` (default true), ``Jx`` is scaled so ∑weights
+        equals the hard cell count (preserves net ∫J).
         """
         i0_i = 0 if i0 is None else int(i0)
         i1_i = self.Nx if i1 is None else int(i1)
         j0_i = 0 if j0 is None else int(j0)
         j1_i = self.Ny if j1 is None else int(j1)
+        jx = float(Jx)
+        re = float(rim_edge)
+        if rim_taper and rim_renorm:
+            nx_s = max(0, i1_i - i0_i)
+            ny_s = max(0, j1_i - j0_i)
+            if nx_s >= 2 and ny_s >= 2:
+                ni, nj = nx_s - 2, ny_s - 2
+                wsum = ni * nj + re * (2 * ni + 2 * nj) + (re * re) * 4
+                jx *= (nx_s * ny_s) / wsum
         self.kern_add_source_Jx(
             self.queue,
             (self.Ny, self.Nx),
             None,
             np.int32(self.Nx), np.int32(self.Ny), np.int32(self.Nz),
-            np.int32(z_src), np.float32(Jx),
+            np.int32(z_src), np.float32(jx),
             np.float32(self.dt), np.float32(EPS0),
             np.int32(i0_i), np.int32(i1_i), np.int32(j0_i), np.int32(j1_i),
+            np.int32(1 if rim_taper else 0),
+            np.float32(re),
             self.eps_buf,
             self.Ex_buf,
         )

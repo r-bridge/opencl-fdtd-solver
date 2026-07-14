@@ -6,8 +6,9 @@
 """Generic OpenCL ↔ Meep mid-plane Ex cases (no application-specific geometry).
 
 Each case exercises features used by typical 3D FDTD workflows:
-vacuum or a simple dielectric block, CPML, SI Jx sheet (trimmed out of PML),
-matched Courant, and mid-plane Ex sampling at fixed checkpoints.
+vacuum or a simple dielectric block, CPML, SI Jx sheet with Meep-matched rim
+taper (trimmed out of PML), matched Courant, and mid-plane Ex sampling at fixed
+checkpoints.
 """
 
 from __future__ import annotations
@@ -130,6 +131,7 @@ def run_opencl_planes(case: PlaneCase) -> dict[int, np.ndarray]:
             i1=nx - p,
             j0=p,
             j1=ny - p,
+            rim_taper=True,
         )
 
     fdtd._sources.append(source_cb)
@@ -356,6 +358,8 @@ def write_case_baselines(
         "block_eps": case.block_eps,
         "courant": float(OPENCL_COURANT),
         "source": "Jx",
+        "rim_taper": True,
+        "rim_edge": 0.8,
         "files": [],
         "discrepancy": {
             "summary": case_summary(rows),

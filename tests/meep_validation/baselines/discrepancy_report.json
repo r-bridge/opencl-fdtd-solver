@@ -9,47 +9,47 @@
       ],
       "checkpoints": [
         {
-          "aligned_residual_energy_ratio": 0.040672132,
-          "lms_scale": 1.0471853,
+          "aligned_residual_energy_ratio": 0.015676057,
+          "lms_scale": 1.0440695,
           "mid_x_lag_cells": 0,
           "peak_meep": 7.4506461e-06,
-          "peak_opencl": 1.5533617e-05,
-          "peak_ratio": 2.0848684,
-          "pearson_corr": 0.97174939,
-          "raw_residual_energy_ratio": 0.042619886,
+          "peak_opencl": 9.9876097e-06,
+          "peak_ratio": 1.3405025,
+          "pearson_corr": 0.98896226,
+          "raw_residual_energy_ratio": 0.017429754,
           "step": 20
         },
         {
-          "aligned_residual_energy_ratio": 0.025987705,
-          "lms_scale": 1.008061,
+          "aligned_residual_energy_ratio": 0.011625833,
+          "lms_scale": 1.0153464,
           "mid_x_lag_cells": 0,
           "peak_meep": 2.7448701e-05,
-          "peak_opencl": 5.2365627e-05,
-          "peak_ratio": 1.9077634,
-          "pearson_corr": 0.98305931,
-          "raw_residual_energy_ratio": 0.026049988,
+          "peak_opencl": 3.4963108e-05,
+          "peak_ratio": 1.2737618,
+          "pearson_corr": 0.99239602,
+          "raw_residual_energy_ratio": 0.011851623,
           "step": 40
         },
         {
-          "aligned_residual_energy_ratio": 0.046253913,
-          "lms_scale": 0.99218511,
+          "aligned_residual_energy_ratio": 0.033978113,
+          "lms_scale": 1.0004902,
           "mid_x_lag_cells": 0,
           "peak_meep": 0.00011202449,
-          "peak_opencl": 0.00020928781,
-          "peak_ratio": 1.8682328,
-          "pearson_corr": 0.97064433,
-          "raw_residual_energy_ratio": 0.046313082,
+          "peak_opencl": 0.00014190405,
+          "peak_ratio": 1.2667235,
+          "pearson_corr": 0.97830803,
+          "raw_residual_energy_ratio": 0.033978344,
           "step": 60
         },
         {
-          "aligned_residual_energy_ratio": 0.080695049,
-          "lms_scale": 0.95404143,
+          "aligned_residual_energy_ratio": 0.07187547,
+          "lms_scale": 0.9646756,
           "mid_x_lag_cells": 1,
           "peak_meep": 0.00038452467,
-          "peak_opencl": 0.00068186468,
-          "peak_ratio": 1.7732664,
-          "pearson_corr": 0.9494438,
-          "raw_residual_energy_ratio": 0.082828379,
+          "peak_opencl": 0.0004710418,
+          "peak_ratio": 1.2249976,
+          "pearson_corr": 0.95468267,
+          "raw_residual_energy_ratio": 0.073119965,
           "step": 80
         }
       ],
@@ -73,10 +73,10 @@
       ],
       "summary": {
         "max_abs_mid_x_lag_cells": 1.0,
-        "mean_aligned_residual_energy_ratio": 0.0484022,
-        "mean_lms_scale": 1.0003682,
-        "mean_pearson_corr": 0.96872421,
-        "mean_raw_residual_energy_ratio": 0.049452834
+        "mean_aligned_residual_energy_ratio": 0.033288868,
+        "mean_lms_scale": 1.0061454,
+        "mean_pearson_corr": 0.97858725,
+        "mean_raw_residual_energy_ratio": 0.034094921
       }
     },
     {
@@ -88,47 +88,47 @@
       ],
       "checkpoints": [
         {
-          "aligned_residual_energy_ratio": 0.041051116,
-          "lms_scale": 1.0472205,
+          "aligned_residual_energy_ratio": 0.016037252,
+          "lms_scale": 1.0440105,
           "mid_x_lag_cells": 0,
           "peak_meep": 7.4506461e-06,
-          "peak_opencl": 1.5533617e-05,
-          "peak_ratio": 2.0848684,
-          "pearson_corr": 0.97164076,
-          "raw_residual_energy_ratio": 0.043000873,
+          "peak_opencl": 9.9876097e-06,
+          "peak_ratio": 1.3405025,
+          "pearson_corr": 0.98877349,
+          "raw_residual_energy_ratio": 0.017785818,
           "step": 20
         },
         {
-          "aligned_residual_energy_ratio": 0.027352102,
-          "lms_scale": 1.0048045,
+          "aligned_residual_energy_ratio": 0.013273793,
+          "lms_scale": 1.0120964,
           "mid_x_lag_cells": 0,
           "peak_meep": 2.7490407e-05,
-          "peak_opencl": 5.2399177e-05,
-          "peak_ratio": 1.9060895,
-          "pearson_corr": 0.98188852,
-          "raw_residual_energy_ratio": 0.02737434,
+          "peak_opencl": 3.4997589e-05,
+          "peak_ratio": 1.2730837,
+          "pearson_corr": 0.99120489,
+          "raw_residual_energy_ratio": 0.013414743,
           "step": 40
         },
         {
-          "aligned_residual_energy_ratio": 0.043532289,
-          "lms_scale": 0.9965607,
+          "aligned_residual_energy_ratio": 0.031912242,
+          "lms_scale": 1.0048907,
           "mid_x_lag_cells": 0,
           "peak_meep": 0.00011256348,
-          "peak_opencl": 0.0002097063,
-          "peak_ratio": 1.8630047,
-          "pearson_corr": 0.97128198,
-          "raw_residual_energy_ratio": 0.043543681,
+          "peak_opencl": 0.0001423327,
+          "peak_ratio": 1.2644661,
+          "pearson_corr": 0.97882973,
+          "raw_residual_energy_ratio": 0.031935172,
           "step": 60
         },
         {
-          "aligned_residual_energy_ratio": 0.069170885,
-          "lms_scale": 0.96782904,
+          "aligned_residual_energy_ratio": 0.061264542,
+          "lms_scale": 0.97858583,
           "mid_x_lag_cells": 1,
           "peak_meep": 0.00038679349,
-          "peak_opencl": 0.00068329292,
-          "peak_ratio": 1.7665575,
-          "pearson_corr": 0.95430056,
-          "raw_residual_energy_ratio": 0.070199376,
+          "peak_opencl": 0.00047250613,
+          "peak_ratio": 1.2215979,
+          "pearson_corr": 0.95925988,
+          "raw_residual_energy_ratio": 0.061714061,
           "step": 80
         }
       ],
@@ -152,14 +152,14 @@
       ],
       "summary": {
         "max_abs_mid_x_lag_cells": 1.0,
-        "mean_aligned_residual_energy_ratio": 0.045276598,
-        "mean_lms_scale": 1.0041037,
-        "mean_pearson_corr": 0.96977796,
-        "mean_raw_residual_energy_ratio": 0.046029568
+        "mean_aligned_residual_energy_ratio": 0.030621957,
+        "mean_lms_scale": 1.0098959,
+        "mean_pearson_corr": 0.979517,
+        "mean_raw_residual_energy_ratio": 0.031212449
       }
     }
   ],
-  "description": "Objective comparison of mid-plane Ex between this OpenCL Yee/CPML solver and Meep on shared abstract cases (SI Jx sheet, matched Courant, sheet trimmed out of PML). Metrics use the non-PML mask.",
+  "description": "Objective comparison of mid-plane Ex between this OpenCL Yee/CPML solver and Meep on shared abstract cases (SI Jx sheet with rim taper, matched Courant, sheet trimmed out of PML). Metrics use the non-PML mask.",
   "metric_definitions": {
     "aligned_residual_energy_ratio": "\u2211(OpenCL\u2212scale\u00b7Meep)\u00b2 / \u2211OpenCL\u00b2 after LMS scale.",
     "lms_scale": "Least-squares scale such that OpenCL \u2248 scale \u00b7 Meep. Near 1.0 means absolute amplitude agreement after source matching.",

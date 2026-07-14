@@ -149,8 +149,9 @@ def build_discrepancy_document(
         "title": "OpenCL ↔ Meep mid-plane Ex discrepancy report",
         "description": (
             "Objective comparison of mid-plane Ex between this OpenCL Yee/CPML "
-            "solver and Meep on shared abstract cases (SI Jx sheet, matched "
-            "Courant, sheet trimmed out of PML). Metrics use the non-PML mask."
+            "solver and Meep on shared abstract cases (SI Jx sheet with rim "
+            "taper, matched Courant, sheet trimmed out of PML). Metrics use "
+            "the non-PML mask."
         ),
         "metric_definitions": {
             "pearson_corr": (
