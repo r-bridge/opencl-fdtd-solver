@@ -25,6 +25,39 @@ MU0  = 4e-7 * np.pi
 EPS0 = 1.0 / (MU0 * C0**2)
 ETA0 = np.sqrt(MU0 / EPS0)
 
+# Reuse one context/queue for default OpenCLFDTD construction. Creating a new
+# cl.Context per instance is fine on discrete GPUs but can segfault POCL (CI)
+# when many contexts are destroyed at process exit.
+_DEFAULT_CTX = None
+_DEFAULT_QUEUE = None
+_DEFAULT_DEVICE = None
+
+
+def _default_opencl_runtime():
+    """Return a process-wide (context, queue, device) for OpenCLFDTD defaults."""
+    global _DEFAULT_CTX, _DEFAULT_QUEUE, _DEFAULT_DEVICE
+    if _DEFAULT_CTX is not None:
+        return _DEFAULT_CTX, _DEFAULT_QUEUE, _DEFAULT_DEVICE
+
+    platforms = cl.get_platforms()
+    if not platforms:
+        raise RuntimeError("No OpenCL platforms found.")
+    devices = []
+    for p in platforms:
+        devices.extend(p.get_devices(cl.device_type.GPU))
+    if not devices:
+        for p in platforms:
+            devices.extend(p.get_devices(cl.device_type.CPU))
+    if not devices:
+        devices = platforms[0].get_devices()
+    if not devices:
+        raise RuntimeError("No OpenCL devices found.")
+
+    _DEFAULT_DEVICE = devices[0]
+    _DEFAULT_CTX = cl.Context([_DEFAULT_DEVICE])
+    _DEFAULT_QUEUE = cl.CommandQueue(_DEFAULT_CTX)
+    return _DEFAULT_CTX, _DEFAULT_QUEUE, _DEFAULT_DEVICE
+
 
 class OpenCLFDTD:
     """
@@ -61,22 +94,9 @@ class OpenCLFDTD:
 
         # Setup OpenCL context and queue
         if ctx is None:
-            platforms = cl.get_platforms()
-            if not platforms:
-                raise RuntimeError("No OpenCL platforms found.")
-            # Search for a GPU first, then CPU
-            devices = []
-            for p in platforms:
-                devices.extend(p.get_devices(cl.device_type.GPU))
-            if not devices:
-                for p in platforms:
-                    devices.extend(p.get_devices(cl.device_type.CPU))
-            if not devices:
-                devices = platforms[0].get_devices()
-            if not devices:
-                raise RuntimeError("No OpenCL devices found.")
-            self.device = devices[0]
-            self.ctx = cl.Context([self.device])
+            self.ctx, shared_queue, self.device = _default_opencl_runtime()
+            if queue is None:
+                queue = shared_queue
         else:
             self.ctx = ctx
             self.device = self.ctx.devices[0]
