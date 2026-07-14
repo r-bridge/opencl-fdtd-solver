@@ -18,6 +18,8 @@ from typing import Any
 import numpy as np
 
 C0 = 299_792_458.0
+# Match OpenCLFDTD: dt = S * dl / c with S = 0.99/sqrt(3). Meep default is 0.5.
+OPENCL_COURANT = 0.99 / float(np.sqrt(3.0))
 
 
 class MeepUnavailableError(RuntimeError):
@@ -25,12 +27,12 @@ class MeepUnavailableError(RuntimeError):
 
 
 def opencl_dt(dl: float) -> float:
-    return 0.99 * dl / (C0 * np.sqrt(3.0))
+    return float(OPENCL_COURANT) * float(dl) / C0
 
 
 def meep_until(n_steps: int, dl: float) -> float:
     """Physical OpenCL runtime in Meep units with length unit = 1 mm."""
-    return float(n_steps * 0.99 / np.sqrt(3.0) * (dl / 1e-3))
+    return float(n_steps) * float(OPENCL_COURANT) * (float(dl) / 1e-3)
 
 
 def gaussian_sine_amp(t: float, freq: float, fwidth: float) -> float:

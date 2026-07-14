@@ -7,6 +7,7 @@
 
 from .harness import (  # noqa: F401
     C0,
+    OPENCL_COURANT,
     MeepUnavailableError,
     complex_align,
     ensure_pyopencl_ctx,

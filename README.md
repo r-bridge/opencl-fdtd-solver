@@ -76,6 +76,23 @@ PYOPENCL_CTX=0 python tests/compare_with_meep.py
 | Dielectric sphere εᵣ=4 | Material + pattern | main lobe `< 3 dB` |
 | PML energy decay | Late/peak Ex energy ratio | both `< 0.05`, ratios within 100× |
 
+### Mid-plane Ex golden images + discrepancy report
+CI regenerates generic side-by-side mid-plane Ex triptychs (`OpenCL | Meep | residual`) and an objective **discrepancy report**, and requires both to match committed baselines under `tests/meep_validation/baselines/`:
+
+- per-case PNGs / float planes
+- [`DISCREPANCY_REPORT.md`](tests/meep_validation/baselines/DISCREPANCY_REPORT.md) (human-readable metrics for repository viewers)
+- `discrepancy_report.json` (exact JSON enforced by CI)
+
+Cases are abstract (`vacuum_sheet`, `dielectric_block`) — matched Courant, soft Ex sheet trimmed out of PML, CPML. Quality gates also fail if mean Pearson correlation, LMS scale, or residual energy worsen beyond fixed floors.
+
+```bash
+# Refresh all committed images, planes, and reports (use POCL/CPU so CI matches):
+IGNORE_GPU=NVIDIA,AMD PYOPENCL_CTX=0 python -m tests.meep_validation.update_plane_baselines
+
+# Enforce parity (same check as CI):
+PYOPENCL_CTX=0 python -m unittest tests.test_meep_plane_baselines -v
+```
+
 OpenCL ↔ NumPy field/monitor parity remains in `tests/test_solver.py` (always run in CI).
 
 ---
