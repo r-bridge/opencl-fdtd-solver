@@ -156,52 +156,29 @@ class TestNumPyEngine(unittest.TestCase):
 
 
 class TestDeviceSelectionFallbacks(unittest.TestCase):
-    def tearDown(self):
-        import opencl_fdtd_solver.engine as eng
-
-        eng._DEFAULT_CTX = None
-        eng._DEFAULT_QUEUE = None
-        eng._DEFAULT_DEVICE = None
-
     def test_prefers_gpu_then_cpu(self):
-        import opencl_fdtd_solver.engine as eng
-
-        eng._DEFAULT_CTX = None
-        eng._DEFAULT_QUEUE = None
-        eng._DEFAULT_DEVICE = None
-
         gpu = mock.Mock()
         gpu.name = "FakeGPU"
         gpu.type = cl.device_type.GPU
         gpu.global_mem_size = 8 * 1024 ** 3
 
-        cpu = mock.Mock()
-        cpu.name = "FakeCPU"
-        cpu.type = cl.device_type.CPU
-        cpu.global_mem_size = 8 * 1024 ** 3
-
-        plat = mock.Mock()
-        plat.get_devices = mock.Mock(
-            side_effect=lambda dtype=None: [gpu] if dtype == cl.device_type.GPU else [cpu]
-        )
-
         fake_ctx = mock.Mock()
         fake_ctx.devices = [gpu]
         fake_queue = mock.Mock()
 
-        with mock.patch("opencl_fdtd_solver.engine.cl.get_platforms", return_value=[plat]), \
-             mock.patch("opencl_fdtd_solver.engine.cl.Context", return_value=fake_ctx) as ctx_ctor, \
-             mock.patch("opencl_fdtd_solver.engine.cl.CommandQueue", return_value=fake_queue), \
-             mock.patch.object(OpenCLFDTD, "_check_device_memory"), \
+        with mock.patch(
+            "opencl_fdtd_solver.engine._default_opencl_runtime",
+            return_value=(fake_ctx, fake_queue, gpu),
+        ), mock.patch.object(OpenCLFDTD, "_check_device_memory"), \
              mock.patch.object(OpenCLFDTD, "_build_cpml"), \
              mock.patch.object(OpenCLFDTD, "_compile_kernels"), \
              mock.patch("opencl_fdtd_solver.engine.cl.Buffer", return_value=mock.Mock()), \
              mock.patch("opencl_fdtd_solver.engine.cl.enqueue_copy"):
             fdtd = OpenCLFDTD((8, 8, 8), 1e-3, npml=1)
 
-        ctx_ctor.assert_called_once()
         self.assertIs(fdtd.device, gpu)
-        self.assertIs(eng._DEFAULT_DEVICE, gpu)
+        self.assertIs(fdtd.ctx, fake_ctx)
+        self.assertIs(fdtd.queue, fake_queue)
 
 
 if __name__ == "__main__":
