@@ -93,6 +93,18 @@ IGNORE_GPU=NVIDIA,AMD PYOPENCL_CTX=0 python -m tests.meep_validation.update_plan
 PYOPENCL_CTX=0 python -m unittest tests.test_meep_plane_baselines -v
 ```
 
+### Near-to-far golden patterns + discrepancy report
+CI also gates committed XZ far-field `|S|(θ)` overlays and EH probes from `OpenCLNear2FarMonitor` vs Meep (`vacuum_farfield`, `dielectric_sphere_farfield`) under the same `baselines/` tree:
+
+- per-case `pattern_xz.png` / `ocl_S_db.npy` / `meep_S_db.npy` / EH arrays
+- [`DISCREPANCY_REPORT_FARFIELD.md`](tests/meep_validation/baselines/DISCREPANCY_REPORT_FARFIELD.md)
+- `discrepancy_report_farfield.json`
+
+```bash
+IGNORE_GPU=NVIDIA,AMD PYOPENCL_CTX=0 python -m tests.meep_validation.update_farfield_baselines
+PYOPENCL_CTX=0 python -m unittest tests.test_meep_farfield_baselines -v
+```
+
 OpenCL ↔ NumPy field/monitor parity remains in `tests/test_solver.py` (always run in CI).
 
 ---

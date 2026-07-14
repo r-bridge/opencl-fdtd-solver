@@ -1,0 +1,63 @@
+{
+  "cases": [
+    {
+      "courant": 0.5715767664977295,
+      "dl_m": 0.002,
+      "freq_hz": 5000000000.0,
+      "fwidth_hz": 1000000000.0,
+      "images": [
+        "pattern_xz.png"
+      ],
+      "max_main_lobe_db": 2.5,
+      "metrics": {
+        "main_lobe_max_abs_db_error": 0.69652689,
+        "meep_null_ratio": 1.8117464e-05,
+        "opencl_null_ratio": 0.026485177
+      },
+      "n_angles": 19,
+      "n_steps": 500,
+      "name": "vacuum_farfield",
+      "npml": 6,
+      "shape": [
+        30,
+        30,
+        30
+      ],
+      "sphere_eps": null,
+      "sphere_rad_cells": 0
+    },
+    {
+      "courant": 0.5715767664977295,
+      "dl_m": 0.002,
+      "freq_hz": 5000000000.0,
+      "fwidth_hz": 1000000000.0,
+      "images": [
+        "pattern_xz.png"
+      ],
+      "max_main_lobe_db": 3.0,
+      "metrics": {
+        "main_lobe_max_abs_db_error": 2.8404971,
+        "meep_null_ratio": 6.2177041e-06,
+        "opencl_null_ratio": 0.035692917
+      },
+      "n_angles": 19,
+      "n_steps": 500,
+      "name": "dielectric_sphere_farfield",
+      "npml": 6,
+      "shape": [
+        30,
+        30,
+        30
+      ],
+      "sphere_eps": 4.0,
+      "sphere_rad_cells": 6
+    }
+  ],
+  "description": "Objective comparison of XZ far-field |S|(\u03b8) and null depth between OpenCLNear2FarMonitor and Meep Near2Far on shared compact-patch cases.",
+  "metric_definitions": {
+    "main_lobe_max_abs_db_error": "Max |\u0394| after aligning each pattern's peak to 0 dB, restricted to angles within mask_db=-12 of both peaks.",
+    "meep_null_ratio": "|E(+x)| / |E(+z)| on Meep (H scaled to SI).",
+    "opencl_null_ratio": "|E(+x)| / |E(+z)| on OpenCL (Ex-dipole endfire null)."
+  },
+  "title": "OpenCL \u2194 Meep near-to-far discrepancy report"
+}
