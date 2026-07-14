@@ -44,6 +44,8 @@ $env:PYOPENCL_CTX='0'
 A generic unit test suite checks OpenCL ↔ NumPy field parity, near-to-far monitors, memory budgeting, and harness helpers. Aim for **≥90%** line coverage of `opencl_fdtd_solver/` (enforced in CI):
 
 ```bash
+PYOPENCL_CTX=0 python tests/run_coverage.py
+# or step-by-step:
 PYOPENCL_CTX=0 python -m coverage run -m unittest \
   tests.test_solver tests.test_unit_engine tests.test_unit_monitors tests.test_unit_harness -v
 python -m coverage report --fail-under=90
