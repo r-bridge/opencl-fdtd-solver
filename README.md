@@ -16,6 +16,7 @@ The mathematical formulations for the Yee-grid field updates and the Convolution
 *   **OpenCL Acceleration:** Runs field updates and DFT accumulations 100% on the GPU/accelerator using customized OpenCL kernels.
 *   **Pluggable Monitors:** Supports host-side NumPy monitors and GPU-side OpenCL monitors for zero-copy DFT accumulation.
 *   **NumPy Fallback:** Includes a pure NumPy CPU reference implementation (`NumPyFDTD`) for testing, fallback, and benchmarking.
+*   **Cell-wise materials:** Nondispersive scalar εᵣ via `set_epsilon`. Subpixel averaging / geometry meshing is left to the caller (see §6).
 *   **Dependency-Free:** Pure Python package with minimal requirements (no C compiler or toolchains required at install time).
 
 ---
@@ -109,7 +110,24 @@ OpenCL ↔ NumPy field/monitor parity remains in `tests/test_solver.py` (always 
 
 ---
 
-## 6. Performance Benchmarks
+## 6. Accuracy for Practical Applications
+
+This package is a **2nd-order Yee + CPML kernel**. For nondispersive scalar-ε problems on a matched uniform grid (same Δx, Courant, and cell-wise materials), it is in the **same accuracy class as MEEP’s default FDTD**. MEEP is not inherently more accurate for that shared physics; the repo’s value proposition is GPU throughput, not higher-order fidelity.
+
+**Evidence (MEEP-relative, abstract cases):** mid-plane Ex shape agrees at ~98% Pearson correlation with ~3% aligned residual energy; far-field main-lobe |S|(θ) differs by ~0.7 dB (vacuum) to ~2.8 dB (εᵣ=4 sphere) under the CI masks. Those baselines use hard voxel materials (`eps_averaging=False` on the MEEP side) and do not certify a specific device design.
+
+**When MEEP (or another full-featured solver) is usually ahead in practice:** dispersive / lossy / magnetic media, PEC/periodic/symmetry BCs, double precision, or any workflow that relies on a built-in geometry stack you do not provide yourself.
+
+**Subpixel averaging is intentionally out of scope.** The solver only accepts a cell-wise scalar εᵣ via `set_epsilon`; geometry sampling and effective-medium construction belong in the application layer. Typical choices include ~4³ subvoxels per Yee cell. At least two approaches fit this design:
+
+1. **Object definitions as OpenCL kernels**, with subvoxel sampling / averaging also performed in OpenCL.
+2. **GPU-accelerated STL tiled rendering** with averaging into the Yee ε grid.
+
+Supply an adequately resolved, averaged ε array (and match sources / Courant carefully), and expect accuracy comparable to MEEP on the same grid for supported physics. Remaining error is dominated by mesh density, float32 dynamic range, and PML / source / near-to-far details—not by the absence of in-solver averaging.
+
+---
+
+## 7. Performance Benchmarks
 Two benchmarks are provided: a small NumPy vs OpenCL check, and an OpenCL GPU vs MEEP CPU comparison.
 
 Throughput is **sustained** cell-updates after warm-up (`queue.finish()` around each timed window). Peak one-shot numbers are easy to overstate; if the model barely fits in VRAM the driver can page to host RAM and effective throughput can drop by ~10× without a clear OpenCL error. The solver therefore **raises `MemoryError` before allocation** when the estimate exceeds usable device memory (total minus 12% / 512 MiB headroom).
