@@ -50,3 +50,11 @@ jobs:
         IGNORE_GPU: "NVIDIA,AMD"
       run: |
         python -m unittest tests.test_meep_plane_baselines -v
+
+    - name: Run MEEP far-field golden baselines (Docker)
+      env:
+        PYOPENCL_CTX: "0"
+        POCL_MAX_PTHREAD_COUNT: "1"
+        IGNORE_GPU: "NVIDIA,AMD"
+      run: |
+        python -m unittest tests.test_meep_farfield_baselines -v
