@@ -120,6 +120,60 @@ class TestOpenCLNear2FarMonitor(unittest.TestCase):
         eh = mon.get_farfields([(0.0, 0.0, 5.0)])
         self.assertEqual(eh.shape, (1, 6))
 
+    @staticmethod
+    def _host_dft_rel_change(cur_faces, prev_faces) -> float:
+        """‖cur−prev‖₂ / ‖cur‖₂ over all six face-packed DFT components."""
+        num = 0.0
+        den = 0.0
+        for key in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
+            c = np.asarray(cur_faces[key], dtype=np.complex128)
+            p = np.asarray(prev_faces[key], dtype=np.complex128)
+            d = c - p
+            num += float(np.vdot(d, d).real)
+            den += float(np.vdot(c, c).real)
+        if den <= 0.0:
+            return 1.0
+        return float(np.sqrt(num / den))
+
+    def test_dft_rel_change_without_snapshot_is_one(self):
+        _, mon = self._small_run(n_steps=20)
+        self.assertIsNone(mon._dft_snap)
+        self.assertEqual(mon.dft_relative_change(), 1.0)
+
+    def test_dft_rel_change_snapshot_then_zero_and_grows(self):
+        fdtd, mon = self._small_run(n_steps=40)
+        self.assertIsNone(mon._dft_snap)
+        mon.snapshot_dft()
+        self.assertIsNotNone(mon._dft_snap)
+        self.assertLess(mon.dft_relative_change(), 1e-5)
+
+        fdtd.run(30)
+        grown = mon.dft_relative_change()
+        self.assertGreater(grown, 1e-3)
+        self.assertLess(grown, 1.0)
+
+    def test_dft_rel_change_matches_host_and_tiny_box(self):
+        """GPU reduction matches host; tiny Huygens box covers lsize shrink."""
+        shape = (16, 16, 16)
+        dl = 1e-3
+        fdtd = OpenCLFDTD(shape, dl, npml=2)
+        fdtd._sources.append(
+            lambda f: f.add_source_Ex(8, 0.05 * np.sin(2 * np.pi * 5e9 * f.t))
+        )
+        mon = OpenCLNear2FarMonitor(fdtd, (8e-3, 8e-3, 8e-3), (2e-3, 2e-3, 2e-3), 5e9)
+        self.assertLess(mon.n_face_samples, 256)
+
+        fdtd.run(25)
+        prev = mon.fetch_dft_fields()
+        mon.snapshot_dft()
+        fdtd.run(20)
+        cur = mon.fetch_dft_fields()
+
+        gpu = mon.dft_relative_change()
+        host = self._host_dft_rel_change(cur, prev)
+        self.assertGreater(host, 1e-3)
+        self.assertAlmostEqual(gpu, host, delta=1e-4)
+
 
 class TestNumPyNear2FarMonitor(unittest.TestCase):
     def test_accumulates_and_farfield_nonzero(self):

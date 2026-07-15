@@ -716,6 +716,66 @@ class OpenCLFDTD:
             }
         }
 
+        /*
+         * Relative L2 change of face DFT vs a previous snapshot:
+         *   sqrt(sum |cur-prev|^2 / sum |cur|^2)
+         * Workgroup-local reduction; host sums partials (tiny download).
+         */
+        __kernel void dft_rel_change_partial(
+            int n,
+            __global const float2 *Ex_c,
+            __global const float2 *Ey_c,
+            __global const float2 *Ez_c,
+            __global const float2 *Hx_c,
+            __global const float2 *Hy_c,
+            __global const float2 *Hz_c,
+            __global const float2 *Ex_p,
+            __global const float2 *Ey_p,
+            __global const float2 *Ez_p,
+            __global const float2 *Hx_p,
+            __global const float2 *Hy_p,
+            __global const float2 *Hz_p,
+            __global float *partial_num,
+            __global float *partial_den,
+            __local float *sn,
+            __local float *sd
+        ) {
+            int lid = get_local_id(0);
+            int gid = get_global_id(0);
+            int grp = get_group_id(0);
+            float nsum = 0.0f;
+            float dsum = 0.0f;
+            if (gid < n) {
+                float2 c, p, d;
+                #define DFT_ACC(CUR, PREV) \\
+                    c = (CUR)[gid]; p = (PREV)[gid]; \\
+                    d.x = c.x - p.x; d.y = c.y - p.y; \\
+                    nsum += d.x * d.x + d.y * d.y; \\
+                    dsum += c.x * c.x + c.y * c.y;
+                DFT_ACC(Ex_c, Ex_p);
+                DFT_ACC(Ey_c, Ey_p);
+                DFT_ACC(Ez_c, Ez_p);
+                DFT_ACC(Hx_c, Hx_p);
+                DFT_ACC(Hy_c, Hy_p);
+                DFT_ACC(Hz_c, Hz_p);
+                #undef DFT_ACC
+            }
+            sn[lid] = nsum;
+            sd[lid] = dsum;
+            barrier(CLK_LOCAL_MEM_FENCE);
+            for (int stride = get_local_size(0) / 2; stride > 0; stride >>= 1) {
+                if (lid < stride) {
+                    sn[lid] += sn[lid + stride];
+                    sd[lid] += sd[lid + stride];
+                }
+                barrier(CLK_LOCAL_MEM_FENCE);
+            }
+            if (lid == 0) {
+                partial_num[grp] = sn[0];
+                partial_den[grp] = sd[0];
+            }
+        }
+
         inline float2 cmul(float2 a, float2 b) {
             return (float2)(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
         }
@@ -974,6 +1034,9 @@ class OpenCLFDTD:
         self.kern_accumulate_dft_face = cl.Kernel(self.program, "accumulate_dft_face")
         self.kern_accumulate_dft_faces_fused = cl.Kernel(
             self.program, "accumulate_dft_faces_fused"
+        )
+        self.kern_dft_rel_change_partial = cl.Kernel(
+            self.program, "dft_rel_change_partial"
         )
         self.kern_farfield_accumulate_nl = cl.Kernel(self.program, "farfield_accumulate_nl")
         self.kern_farfield_nl_to_eh = cl.Kernel(self.program, "farfield_nl_to_eh")
