@@ -259,6 +259,11 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         self._eh_buf = None
         self._nl_buf = None
         self._eh_cap = 0
+        # Optional DFT snapshot for relative-change convergence (device-side).
+        self._dft_snap = None
+        self._dft_rel_partial_num = None
+        self._dft_rel_partial_den = None
+        self._dft_rel_n_groups = 0
 
         # Phase recurrence: phase_{n+1} = phase_n * exp(j ω Δt)
         self._dphase = np.exp(1j * self.omega * float(fdtd.dt))
@@ -275,6 +280,92 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         self._nz_i32 = np.int32(fdtd.Nz)
 
         fdtd._monitors.append(self)
+
+    def _dft_bufs(self):
+        return (
+            self.Ex_dft_buf,
+            self.Ey_dft_buf,
+            self.Ez_dft_buf,
+            self.Hx_dft_buf,
+            self.Hy_dft_buf,
+            self.Hz_dft_buf,
+        )
+
+    def _ensure_dft_snapshot(self) -> None:
+        if self._dft_snap is not None:
+            return
+        mf = cl.mem_flags
+        fdtd = self.fdtd
+        nbytes = self.n_face_samples * 8
+        self._dft_snap = tuple(
+            cl.Buffer(fdtd.ctx, mf.READ_WRITE, nbytes) for _ in range(6)
+        )
+        zeros = np.zeros(self.n_face_samples * 2, dtype=np.float32)
+        for buf in self._dft_snap:
+            cl.enqueue_copy(fdtd.queue, buf, zeros)
+
+    def snapshot_dft(self) -> None:
+        """Copy current face DFT buffers → device snapshot (no host round-trip)."""
+        self._ensure_dft_snapshot()
+        q = self.fdtd.queue
+        for cur, prev in zip(self._dft_bufs(), self._dft_snap):
+            cl.enqueue_copy(q, prev, cur)
+
+    def dft_relative_change(self) -> float:
+        """
+        OpenCL L2 relative change of face DFT vs last ``snapshot_dft``.
+
+        Returns ``||cur - prev||_2 / ||cur||_2``. If the snapshot is missing or
+        ``||cur||≈0``, returns ``1.0`` (treat as not converged).
+        """
+        if self._dft_snap is None:
+            return 1.0
+        fdtd = self.fdtd
+        n = int(self.n_face_samples)
+        lsize = 256
+        while lsize > 1 and lsize > n:
+            lsize //= 2
+        lsize = max(1, lsize)
+        n_groups = (n + lsize - 1) // lsize
+        gsize = n_groups * lsize
+
+        mf = cl.mem_flags
+        if self._dft_rel_n_groups < n_groups:
+            self._dft_rel_n_groups = n_groups
+            self._dft_rel_partial_num = cl.Buffer(
+                fdtd.ctx, mf.WRITE_ONLY, n_groups * 4
+            )
+            self._dft_rel_partial_den = cl.Buffer(
+                fdtd.ctx, mf.WRITE_ONLY, n_groups * 4
+            )
+
+        cur = self._dft_bufs()
+        prev = self._dft_snap
+        fdtd.kern_dft_rel_change_partial.set_args(
+            np.int32(n),
+            cur[0], cur[1], cur[2], cur[3], cur[4], cur[5],
+            prev[0], prev[1], prev[2], prev[3], prev[4], prev[5],
+            self._dft_rel_partial_num,
+            self._dft_rel_partial_den,
+            cl.LocalMemory(lsize * 4),
+            cl.LocalMemory(lsize * 4),
+        )
+        cl.enqueue_nd_range_kernel(
+            fdtd.queue,
+            fdtd.kern_dft_rel_change_partial,
+            (gsize,),
+            (lsize,),
+        )
+        num_h = np.empty(n_groups, dtype=np.float32)
+        den_h = np.empty(n_groups, dtype=np.float32)
+        cl.enqueue_copy(fdtd.queue, num_h, self._dft_rel_partial_num)
+        cl.enqueue_copy(fdtd.queue, den_h, self._dft_rel_partial_den)
+        fdtd.queue.finish()
+        num = float(np.sum(num_h, dtype=np.float64))
+        den = float(np.sum(den_h, dtype=np.float64))
+        if den <= 0.0 or not np.isfinite(den) or not np.isfinite(num):
+            return 1.0
+        return float(np.sqrt(max(num, 0.0) / den))
 
     def __call__(self, fdtd):
         if self._phase is None:
