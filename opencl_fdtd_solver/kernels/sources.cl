@@ -8,7 +8,7 @@ __kernel void add_source_Ex(
     int Nx, int Ny, int Nz,
     int z_src, float amp,
     int i0, int i1, int j0, int j1,
-    __global float *Ex
+    __global float * restrict Ex
 ) {
     int j = get_global_id(0);
     int i = get_global_id(1);
@@ -30,8 +30,8 @@ __kernel void add_source_Jx(
     int i0, int i1, int j0, int j1,
     int rim_taper,
     float rim_edge,
-    __global const float *eps_r,
-    __global float *Ex
+    __global const float * restrict eps_r,
+    __global float * restrict Ex
 ) {
     int j = get_global_id(0);
     int i = get_global_id(1);
