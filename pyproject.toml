@@ -17,6 +17,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# CUDA engine (CUDAFDTD). Pick the wheel matching your CUDA driver generation;
+# cupy-cuda12x works too. [ctk] pulls NVRTC headers so no local toolkit is needed.
+cuda = [
+  "cupy-cuda13x[ctk]",
+]
 test = [
   "matplotlib",
   "pillow",
@@ -31,7 +36,7 @@ lint = [
 include = ["opencl_fdtd_solver*","tests*","benchmarks*"]
 
 [tool.setuptools.package-data]
-"opencl_fdtd_solver" = ["kernels/*.cl"]
+"opencl_fdtd_solver" = ["kernels/*.cl", "kernels/*.cu"]
 
 [tool.ruff]
 target-version = "py311"

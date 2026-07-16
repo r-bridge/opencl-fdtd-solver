@@ -14,6 +14,7 @@ The mathematical formulations for the Yee-grid field updates and the Convolution
 
 ## 2. Features
 *   **OpenCL Acceleration:** Runs field updates and DFT accumulations 100% on the GPU/accelerator using customized OpenCL kernels.
+*   **CUDA Engine (optional):** `CUDAFDTD` + `CUDANear2FarMonitor` run the same kernels via CuPy/NVRTC in **FP32 or FP64**. The FP32 path agrees with the OpenCL engine (enforced by `tests/test_cuda_solver.py`); FP64 is validated against the float64 NumPy reference.
 *   **Pluggable Monitors:** Supports host-side NumPy monitors and GPU-side OpenCL monitors for zero-copy DFT accumulation.
 *   **NumPy Fallback:** Includes a pure NumPy CPU reference implementation (`NumPyFDTD`) for testing, fallback, and benchmarking.
 *   **Cell-wise materials:** Nondispersive scalar εᵣ via `set_epsilon`. Subpixel averaging / geometry meshing is left to the caller (see §6).
@@ -28,6 +29,16 @@ Ensure you have an OpenCL platform (NVIDIA CUDA, AMD, Intel, or POCL) installed,
 pip install -e .
 # Optional: Meep baseline / coverage tooling
 pip install -e ".[test]"
+# Optional: CUDA engine (NVIDIA driver required; no CUDA toolkit needed —
+# [ctk] ships the NVRTC headers). Use cupy-cuda12x on older drivers.
+pip install -e ".[cuda]"
+```
+
+The CUDA engine is a drop-in for the OpenCL one and adds a dtype switch:
+
+```python
+from opencl_fdtd_solver import CUDAFDTD, CUDANear2FarMonitor
+sim = CUDAFDTD((200, 200, 200), 1e-3, npml=12, dtype=np.float64)  # or np.float32
 ```
 
 For GPU runs, point PyOpenCL at your GPU platform (often `0` for NVIDIA CUDA):
