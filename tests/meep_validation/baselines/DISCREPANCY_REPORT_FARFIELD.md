@@ -5,8 +5,8 @@ Objective comparison of XZ far-field |S|(θ) and null depth between OpenCLNear2F
 ## Metric definitions
 
 - **`main_lobe_max_abs_db_error`:** Max |Δ| after aligning each pattern's peak to 0 dB, restricted to angles within mask_db=-12 of both peaks.
-- **`opencl_null_ratio`:** |E(+x)| / |E(+z)| on OpenCL (Ex-dipole endfire null).
 - **`meep_null_ratio`:** |E(+x)| / |E(+z)| on Meep (H scaled to SI).
+- **`opencl_null_ratio`:** |E(+x)| / |E(+z)| on OpenCL (Ex-dipole endfire null).
 
 ## Case `vacuum_farfield`
 
