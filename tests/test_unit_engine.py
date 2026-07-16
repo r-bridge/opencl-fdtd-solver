@@ -458,6 +458,89 @@ class TestDeviceSelectionFallbacks(unittest.TestCase):
         self.assertIs(fdtd.ctx, fake_ctx)
         self.assertIs(fdtd.queue, fake_queue)
 
+    def _reset_default_runtime(self):
+        import opencl_fdtd_solver.engine as eng
+
+        eng._DEFAULT_CTX = None
+        eng._DEFAULT_QUEUE = None
+        eng._DEFAULT_DEVICE = None
+
+    def _fake_platform(self, devices):
+        plat = mock.Mock()
+        plat.get_devices.return_value = devices
+        return plat
+
+    def test_ignore_gpu_prefers_cpu(self):
+        """IGNORE_GPU skips vendor matches so POCL/CPU is chosen in CI."""
+        from opencl_fdtd_solver.engine import _default_opencl_runtime
+
+        gpu = mock.Mock()
+        gpu.name = "NVIDIA GeForce"
+        gpu.vendor = "NVIDIA"
+        gpu.type = cl.device_type.GPU
+        cpu = mock.Mock()
+        cpu.name = "pthread-haswell"
+        cpu.vendor = "GenuineIntel"
+        cpu.type = cl.device_type.CPU
+        plat = self._fake_platform([gpu, cpu])
+        fake_ctx = mock.Mock()
+        fake_queue = mock.Mock()
+
+        self._reset_default_runtime()
+        with (
+            mock.patch.dict(os.environ, {"IGNORE_GPU": "NVIDIA,AMD"}),
+            mock.patch("opencl_fdtd_solver.engine.cl.get_platforms", return_value=[plat]),
+            mock.patch("opencl_fdtd_solver.engine.cl.Context", return_value=fake_ctx) as ctx_ctor,
+            mock.patch(
+                "opencl_fdtd_solver.engine.cl.CommandQueue", return_value=fake_queue
+            ),
+        ):
+            ctx, queue, device = _default_opencl_runtime()
+
+        self.assertIs(device, cpu)
+        self.assertIs(ctx, fake_ctx)
+        self.assertIs(queue, fake_queue)
+        ctx_ctor.assert_called_once_with([cpu])
+        self._reset_default_runtime()
+
+    def test_ignore_gpu_falls_back_when_all_filtered(self):
+        """If IGNORE_GPU removes every device, fall back to the unfiltered list."""
+        from opencl_fdtd_solver.engine import _default_opencl_runtime
+
+        gpu = mock.Mock()
+        gpu.name = "AMD Radeon"
+        gpu.vendor = "AMD"
+        gpu.type = cl.device_type.GPU
+        plat = self._fake_platform([gpu])
+        fake_ctx = mock.Mock()
+        fake_queue = mock.Mock()
+
+        self._reset_default_runtime()
+        with (
+            mock.patch.dict(os.environ, {"IGNORE_GPU": "AMD"}),
+            mock.patch("opencl_fdtd_solver.engine.cl.get_platforms", return_value=[plat]),
+            mock.patch("opencl_fdtd_solver.engine.cl.Context", return_value=fake_ctx),
+            mock.patch(
+                "opencl_fdtd_solver.engine.cl.CommandQueue", return_value=fake_queue
+            ),
+        ):
+            _, _, device = _default_opencl_runtime()
+
+        self.assertIs(device, gpu)
+        self._reset_default_runtime()
+
+    def test_no_platforms_raises(self):
+        from opencl_fdtd_solver.engine import _default_opencl_runtime
+
+        self._reset_default_runtime()
+        with (
+            mock.patch.dict(os.environ, {"IGNORE_GPU": ""}, clear=False),
+            mock.patch("opencl_fdtd_solver.engine.cl.get_platforms", return_value=[]),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "No OpenCL platforms"):
+                _default_opencl_runtime()
+        self._reset_default_runtime()
+
 
 if __name__ == "__main__":
     unittest.main()
