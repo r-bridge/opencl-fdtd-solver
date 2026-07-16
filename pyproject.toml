@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+# Tooling config for lint/format/typecheck (packaging metadata remains in setup.py).
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["opencl_fdtd_solver", "tests", "benchmarks"]
+extend-exclude = [
+    "tests/meep_validation/baselines",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+]
+ignore = [
+    "E501",  # line length handled by the formatter; scientific lines often exceed 100
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.11"
+files = ["opencl_fdtd_solver"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+show_error_codes = true
+pretty = true
+# Gradual typing: do not fail on untyped defs yet.
+check_untyped_defs = false
+disallow_untyped_defs = false

@@ -68,9 +68,7 @@ def write_triptych_png(
     try:
         from PIL import Image
 
-        Image.fromarray(rgb, mode="RGB").save(
-            path, format="PNG", optimize=False, compress_level=6
-        )
+        Image.fromarray(rgb, mode="RGB").save(path, format="PNG", optimize=False, compress_level=6)
     except ImportError:
         from matplotlib.image import imsave
 

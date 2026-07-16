@@ -7,24 +7,18 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import numpy as np
-
 from opencl_fdtd_solver import OpenCLFDTD, OpenCLNear2FarMonitor
 
 from . import (
-    C0,
     ensure_pyopencl_ctx,
     gaussian_sine_amp,
     meep_until,
-    opencl_dt,
     parse_meep_json,
-    poynting_db_from_eh,
     run_meep_script,
 )
-
 
 # Shared reference geometry (matches historical compare_with_meep.py)
 SHAPE = (30, 30, 30)
@@ -198,10 +192,10 @@ def run_meep_nearfield_dft(probe_ijk: list[tuple[int, int, int]]) -> dict[str, A
         z = (k - SHAPE[2] / 2.0) * (DL * 1e3)
         probes_mm.append((x, y, z))
 
-    probe_list = ",\n".join(
-        f"    mp.Vector3({x}, {y}, {z})" for x, y, z in probes_mm
-    )
-    script = _meep_common_preamble(None, compact_source=False) + f"""
+    probe_list = ",\n".join(f"    mp.Vector3({x}, {y}, {z})" for x, y, z in probes_mm)
+    script = (
+        _meep_common_preamble(None, compact_source=False)
+        + f"""
 probe_pts = [
 {probe_list}
 ]
@@ -234,10 +228,13 @@ for pt, ser in zip(probe_pts, series):
                 "Ex_dft_real": complex(acc).real, "Ex_dft_imag": complex(acc).imag}})
 print("MEEP_JSON:" + json.dumps({{"probes": out}}))
 """
+    )
     return parse_meep_json(run_meep_script(script))
 
 
-def run_opencl_farfield_pattern(n_angles: int = 19, eps: np.ndarray | None = None) -> dict[str, Any]:
+def run_opencl_farfield_pattern(
+    n_angles: int = 19, eps: np.ndarray | None = None
+) -> dict[str, Any]:
     fdtd = _make_solver(eps, compact_source=True)
     mon = OpenCLNear2FarMonitor(fdtd, MONITOR_CTR, MONITOR_SIZE, FREQ)
     fdtd.run(N_STEPS)
@@ -254,8 +251,12 @@ def run_opencl_farfield_pattern(n_angles: int = 19, eps: np.ndarray | None = Non
     }
 
 
-def run_meep_farfield_pattern(n_angles: int = 19, eps_sphere: float | None = None) -> dict[str, Any]:
-    script = _meep_common_preamble(eps_sphere, compact_source=True) + f"""
+def run_meep_farfield_pattern(
+    n_angles: int = 19, eps_sphere: float | None = None
+) -> dict[str, Any]:
+    script = (
+        _meep_common_preamble(eps_sphere, compact_source=True)
+        + f"""
 R = 5.0
 n2f_regions = [
     mp.Near2FarRegion(center=mp.Vector3(x=-2*R), size=mp.Vector3(0, 4*R, 4*R), weight=+1),
@@ -302,6 +303,7 @@ print("MEEP_JSON:" + json.dumps({{
     "eh_plus_x": pack_eh(ff_x),
 }}))
 """
+    )
     return parse_meep_json(run_meep_script(script))
 
 
@@ -336,7 +338,9 @@ def run_opencl_pml_decay() -> dict[str, Any]:
 def run_meep_pml_decay() -> dict[str, Any]:
     until_drive = meep_until(N_STEPS, DL)
     until_total = meep_until(N_STEPS * 4, DL)
-    script = _meep_common_preamble(None, compact_source=False) + f"""
+    script = (
+        _meep_common_preamble(None, compact_source=False)
+        + f"""
 def ex_energy(sim):
     ex = sim.get_array(component=mp.Ex, center=mp.Vector3(), size=cell)
     return float(np.sum(np.abs(ex)**2))
@@ -355,6 +359,7 @@ print("MEEP_JSON:" + json.dumps({{
     "ratio_late_over_peak": e_late / max(e_peak, 1e-30),
 }}))
 """
+    )
     return parse_meep_json(run_meep_script(script))
 
 

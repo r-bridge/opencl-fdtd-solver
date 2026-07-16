@@ -59,6 +59,18 @@ Minimal smoke without coverage:
 PYOPENCL_CTX=0 python -m unittest tests.test_solver tests.test_unit_engine tests.test_unit_monitors tests.test_unit_harness -v
 ```
 
+### Lint / format / typecheck
+CI also runs Ruff (lint + format) and Mypy on `opencl_fdtd_solver/`:
+
+```bash
+pip install -e ".[lint]"
+ruff check opencl_fdtd_solver tests benchmarks setup.py
+ruff format --check opencl_fdtd_solver tests benchmarks setup.py
+mypy opencl_fdtd_solver
+```
+
+Optional local hooks: `pip install pre-commit && pre-commit install`.
+
 ---
 
 ## 5. MEEP Correctness Comparison

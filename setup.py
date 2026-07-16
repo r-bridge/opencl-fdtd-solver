@@ -1,4 +1,4 @@
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 setup(
     name="opencl_fdtd_solver",
@@ -21,12 +21,16 @@ setup(
             "pillow",
             "coverage",
         ],
+        "lint": [
+            "ruff>=0.8",
+            "mypy>=1.8",
+        ],
     },
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
         "Operating System :: OS Independent",
-        "Topic :: Scientific/Engineering"
+        "Topic :: Scientific/Engineering",
     ],
     python_requires=">=3.6",
 )

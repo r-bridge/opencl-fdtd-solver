@@ -14,8 +14,7 @@ import unittest
 from pathlib import Path
 
 import numpy as np
-
-from tests.meep_validation.harness import MeepUnavailableError, OPENCL_COURANT
+from tests.meep_validation.harness import OPENCL_COURANT, MeepUnavailableError
 from tests.meep_validation.plane_cases import (
     baselines_root,
     default_plane_cases,
@@ -123,9 +122,7 @@ class TestMeepPlaneBaselines(unittest.TestCase):
                         expected = read_png_rgb(baseline)
                         actual = read_png_rgb(actual_path)
                     if not np.array_equal(expected, actual):
-                        diff = np.abs(
-                            expected.astype(np.int16) - actual.astype(np.int16)
-                        )
+                        diff = np.abs(expected.astype(np.int16) - actual.astype(np.int16))
                         raise AssertionError(
                             f"{case.name} step {step}: PNG pixels differ from "
                             f"baseline (max|Δ|={int(diff.max())}, "
@@ -144,9 +141,7 @@ class TestMeepPlaneBaselines(unittest.TestCase):
         root = baselines_root()
         case_docs = []
         for case in default_plane_cases():
-            ocl, meep = load_case_planes_from_baselines(
-                root / case.name, case.checkpoints
-            )
+            ocl, meep = load_case_planes_from_baselines(root / case.name, case.checkpoints)
             rows = measure_case(ocl, meep, npml=case.npml, checkpoints=case.checkpoints)
             case_docs.append(
                 case_report_dict(
@@ -165,9 +160,7 @@ class TestMeepPlaneBaselines(unittest.TestCase):
                 )
             )
         rebuilt = build_discrepancy_document(case_docs)
-        expected = json.loads(
-            (root / "discrepancy_report.json").read_text(encoding="utf-8")
-        )
+        expected = json.loads((root / "discrepancy_report.json").read_text(encoding="utf-8"))
         self.assertEqual(
             rebuilt,
             expected,
