@@ -7,6 +7,10 @@ setup(
     description="A generic 3D Yee-grid FDTD electromagnetic solver accelerated with OpenCL.",
     license="GPLv3",
     packages=find_packages(),
+    package_data={
+        "opencl_fdtd_solver": ["kernels/*.cl"],
+    },
+    include_package_data=True,
     install_requires=[
         "numpy",
         "pyopencl",

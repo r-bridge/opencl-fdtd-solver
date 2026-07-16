@@ -17,6 +17,40 @@ import numpy as np
 import pyopencl as cl
 
 from opencl_fdtd_solver import OpenCLFDTD, NumPyFDTD
+from opencl_fdtd_solver.kernels import KERNEL_FILES, load_kernel_source
+
+
+EXPECTED_KERNELS = (
+    "update_H_interior",
+    "update_H_pml",
+    "update_E_interior",
+    "update_E_pml",
+    "add_source_Ex",
+    "add_source_Jx",
+    "accumulate_dft",
+    "accumulate_dft_face",
+    "accumulate_dft_faces_fused",
+    "dft_rel_change_partial",
+    "farfield_accumulate_nl",
+    "farfield_nl_to_eh",
+)
+
+
+class TestKernelSources(unittest.TestCase):
+    def test_packaged_cl_files_exist_and_list_kernels(self):
+        src = load_kernel_source()
+        self.assertEqual(KERNEL_FILES, ("yee_update.cl", "sources.cl", "dft_farfield.cl"))
+        for name in EXPECTED_KERNELS:
+            self.assertIn(f"__kernel void {name}", src, name)
+        # Macro line-continuations must be single backslashes (not Python-escaped).
+        self.assertRegex(src, r"#define DFT_ACC\(CUR, PREV\) \\\n")
+
+    def test_opencl_program_builds(self):
+        os.environ.setdefault("PYOPENCL_CTX", "0")
+        ctx = cl.create_some_context(interactive=False)
+        program = cl.Program(ctx, load_kernel_source()).build()
+        for name in EXPECTED_KERNELS:
+            cl.Kernel(program, name)
 
 
 class TestMemoryEstimate(unittest.TestCase):
