@@ -119,14 +119,21 @@ class TestOpenCLEngineBasics(unittest.TestCase):
         self.assertEqual(fdtd.step_num, 3)
 
     def test_set_epsilon_roundtrip(self):
+        from opencl_fdtd_solver.constants import EPS0
+
         fdtd = OpenCLFDTD((12, 12, 12), 1e-3, npml=2)
         eps = np.ones((12, 12, 12), dtype=np.float32)
         eps[6, 6, 6] = 4.0
         fdtd.set_epsilon(eps)
         host = np.empty(12 * 12 * 12, dtype=np.float32)
-        cl.enqueue_copy(fdtd.queue, host, fdtd.eps_buf)
+        cl.enqueue_copy(fdtd.queue, host, fdtd.ce_buf)
         fdtd.queue.finish()
-        self.assertAlmostEqual(float(host.reshape(12, 12, 12)[6, 6, 6]), 4.0)
+        # Device stores the E-update coefficient dt/(eps0*eps_r).
+        ce = host.reshape(12, 12, 12)
+        expected_eps4 = fdtd.dt / (EPS0 * 4.0)
+        expected_vac = fdtd.dt / EPS0
+        self.assertAlmostEqual(float(ce[6, 6, 6]) / expected_eps4, 1.0, places=6)
+        self.assertAlmostEqual(float(ce[0, 0, 0]) / expected_vac, 1.0, places=6)
 
     def test_set_epsilon_shape_mismatch(self):
         fdtd = OpenCLFDTD((10, 10, 10), 1e-3, npml=2)
