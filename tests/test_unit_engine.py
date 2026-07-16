@@ -42,11 +42,34 @@ class TestPackageMetadata(unittest.TestCase):
         self.assertEqual(opencl_fdtd_solver.__name__, "opencl_fdtd_solver")
         self.assertEqual(opencl_fdtd_solver.__version__, "1.0.0")
 
-    def test_face_cpml_scaffold_imports(self):
+    def test_face_cpml_storage_layout(self):
         sim = NumPyFDTD_FaceCPML((8, 8, 8), 1e-3, npml=2)
-        self.assertEqual(getattr(sim, "CPML_STORAGE", ""), "face")
-        # Basic step should run (delegated to base for now)
+        self.assertEqual(sim.CPML_STORAGE, "face")
+        self.assertEqual(sim._psi_Hy_x.shape, (4, 8, 8))
+        self.assertEqual(sim._psi_Hx_y.shape, (8, 4, 8))
+        self.assertEqual(sim._psi_Hx_z.shape, (8, 8, 4))
+        self.assertEqual(sim.psi_x_size, 4 * 8 * 8)
         sim.step()
+
+    def test_face_cpml_matches_volume_numpy(self):
+        shape = (24, 24, 24)
+        dl = 1e-3
+        npml = 4
+        vol = NumPyFDTD(shape, dl, npml=npml)
+        face = NumPyFDTD_FaceCPML(shape, dl, npml=npml)
+        z = shape[2] // 2
+
+        def src(f):
+            f.Ex[npml:-npml, npml:-npml, z] += np.sin(2 * np.pi * 5e9 * f.t)
+
+        vol.add_source(src)
+        face.add_source(src)
+        for _ in range(40):
+            vol.step()
+            face.step()
+        for name in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
+            diff = float(np.max(np.abs(getattr(vol, name) - getattr(face, name))))
+            self.assertLess(diff, 1e-5, f"{name} face vs volume: {diff:.3e}")
 
 
 class TestKernelSources(unittest.TestCase):
