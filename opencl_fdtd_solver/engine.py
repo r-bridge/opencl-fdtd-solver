@@ -342,6 +342,47 @@ class OpenCLFDTD(SourceMonitorMixin):
             (_pad(nz_i), ny_i, nx_i) if (nx_i > 0 and ny_i > 0 and nz_i > 0) else None
         )
 
+        # PML kernels launch once over a packed 1-D shell index that covers
+        # exactly the PML cells (or the full grid when npml == 0), instead of
+        # a full-grid launch where ~(1 - shell fraction) of threads
+        # early-return. Kernel-side decode uses per-slab metadata:
+        # slabs[7*s + 0..6] = start offset, i0, j0, k0, di, dj, dk.
+        slabs = []
+
+        def _add_slab(i0, i1, j0, j1, k0, k1):
+            if i1 <= i0 or j1 <= j0 or k1 <= k0:
+                return
+            start = slabs[-1][0] + slabs[-1][4] * slabs[-1][5] * slabs[-1][6] if slabs else 0
+            slabs.append([start, i0, j0, k0, i1 - i0, j1 - j0, k1 - k0])
+
+        Nx, Ny, Nz = self.Nx, self.Ny, self.Nz
+        if n > 0:
+            # Clamped so slab pairs never overlap even when 2*npml >= extent.
+            _add_slab(0, Nx, 0, Ny, 0, min(n, Nz))
+            _add_slab(0, Nx, 0, Ny, max(n, Nz - n), Nz)
+            k0i, k1i = n, Nz - n
+            _add_slab(0, Nx, 0, min(n, Ny), k0i, k1i)
+            _add_slab(0, Nx, max(n, Ny - n), Ny, k0i, k1i)
+            j0i, j1i = n, Ny - n
+            _add_slab(0, min(n, Nx), j0i, j1i, k0i, k1i)
+            _add_slab(max(n, Nx - n), Nx, j0i, j1i, k0i, k1i)
+        else:
+            _add_slab(0, Nx, 0, Ny, 0, Nz)
+
+        last = slabs[-1]
+        self._n_shell = last[0] + last[4] * last[5] * last[6]
+        self._n_slabs = len(slabs)
+        meta = np.asarray(slabs, dtype=np.int32).flatten()
+        mf = cl.mem_flags
+        self._shell_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=meta)
+        self._gs_shell = (_pad(self._n_shell),)
+        self._ls_shell = (lk,)
+        self._shell_args = (
+            np.int32(self._n_shell),
+            np.int32(self._n_slabs),
+            self._shell_buf,
+        )
+
     def add_source_Ex(self, z_src, amp, i0=None, i1=None, j0=None, j1=None):
         """Soft-add a sheet amplitude directly onto ``Ex`` (legacy field inject).
 
@@ -435,123 +476,73 @@ class OpenCLFDTD(SourceMonitorMixin):
         dtm_f = np.float32(self.dt / MU0)
         dtm_dl = np.float32(self.dt / (MU0 * self.dl))
 
-        if self.npml > 0:
-            if self._gs_interior is not None:
-                self.kern_update_H_interior(
-                    self.queue,
-                    self._gs_interior,
-                    self._ls_update,
-                    nx,
-                    ny,
-                    nz,
-                    npml,
-                    dtm_dl,
-                    self.Ex_buf,
-                    self.Ey_buf,
-                    self.Ez_buf,
-                    self.Hx_buf,
-                    self.Hy_buf,
-                    self.Hz_buf,
-                )
-            self.kern_update_H_pml(
+        if self.npml > 0 and self._gs_interior is not None:
+            self.kern_update_H_interior(
                 self.queue,
-                self._gs_full,
+                self._gs_interior,
                 self._ls_update,
                 nx,
                 ny,
                 nz,
                 npml,
-                dtm_f,
+                dtm_dl,
                 self.Ex_buf,
                 self.Ey_buf,
                 self.Ez_buf,
                 self.Hx_buf,
                 self.Hy_buf,
                 self.Hz_buf,
-                self.bx_buf,
-                self.cx_buf,
-                self.kx_buf,
-                self.by_buf,
-                self.cy_buf,
-                self.ky_buf,
-                self.bz_buf,
-                self.cz_buf,
-                self.kz_buf,
-                self.psi_Hx_y_buf,
-                self.psi_Hx_z_buf,
-                self.psi_Hy_x_buf,
-                self.psi_Hy_z_buf,
-                self.psi_Hz_x_buf,
-                self.psi_Hz_y_buf,
             )
-        else:
-            # npml==0: use boundary-guarded full-domain kernel. The psi-free
-            # interior kernel assumes a viable stencil neighborhood and will
-            # read out-of-bounds if launched over the entire grid.
-            self.kern_update_H_pml(
-                self.queue,
-                self._gs_full,
-                self._ls_update,
-                nx,
-                ny,
-                nz,
-                np.int32(0),
-                dtm_f,
-                self.Ex_buf,
-                self.Ey_buf,
-                self.Ez_buf,
-                self.Hx_buf,
-                self.Hy_buf,
-                self.Hz_buf,
-                self.bx_buf,
-                self.cx_buf,
-                self.kx_buf,
-                self.by_buf,
-                self.cy_buf,
-                self.ky_buf,
-                self.bz_buf,
-                self.cz_buf,
-                self.kz_buf,
-                self.psi_Hx_y_buf,
-                self.psi_Hx_z_buf,
-                self.psi_Hy_x_buf,
-                self.psi_Hy_z_buf,
-                self.psi_Hz_x_buf,
-                self.psi_Hz_y_buf,
-            )
+        # Boundary-guarded kernel over the packed PML shell (or the full grid
+        # when npml == 0; the psi-free interior kernel would read out-of-bounds).
+        self.kern_update_H_pml(
+            self.queue,
+            self._gs_shell,
+            self._ls_shell,
+            nx,
+            ny,
+            nz,
+            npml,
+            *self._shell_args,
+            dtm_f,
+            self.Ex_buf,
+            self.Ey_buf,
+            self.Ez_buf,
+            self.Hx_buf,
+            self.Hy_buf,
+            self.Hz_buf,
+            self.bx_buf,
+            self.cx_buf,
+            self.kx_buf,
+            self.by_buf,
+            self.cy_buf,
+            self.ky_buf,
+            self.bz_buf,
+            self.cz_buf,
+            self.kz_buf,
+            self.psi_Hx_y_buf,
+            self.psi_Hx_z_buf,
+            self.psi_Hy_x_buf,
+            self.psi_Hy_z_buf,
+            self.psi_Hz_x_buf,
+            self.psi_Hz_y_buf,
+        )
 
     def _update_E(self):
         nx, ny, nz = np.int32(self.Nx), np.int32(self.Ny), np.int32(self.Nz)
         npml = np.int32(self.npml)
         inv_dl = np.float32(1.0 / self.dl)
 
-        if self.npml > 0:
-            if self._gs_interior is not None:
-                self.kern_update_E_interior(
-                    self.queue,
-                    self._gs_interior,
-                    self._ls_update,
-                    nx,
-                    ny,
-                    nz,
-                    npml,
-                    inv_dl,
-                    self.ce_buf,
-                    self.Hx_buf,
-                    self.Hy_buf,
-                    self.Hz_buf,
-                    self.Ex_buf,
-                    self.Ey_buf,
-                    self.Ez_buf,
-                )
-            self.kern_update_E_pml(
+        if self.npml > 0 and self._gs_interior is not None:
+            self.kern_update_E_interior(
                 self.queue,
-                self._gs_full,
+                self._gs_interior,
                 self._ls_update,
                 nx,
                 ny,
                 nz,
                 npml,
+                inv_dl,
                 self.ce_buf,
                 self.Hx_buf,
                 self.Hy_buf,
@@ -559,54 +550,39 @@ class OpenCLFDTD(SourceMonitorMixin):
                 self.Ex_buf,
                 self.Ey_buf,
                 self.Ez_buf,
-                self.bx_buf,
-                self.cx_buf,
-                self.kx_buf,
-                self.by_buf,
-                self.cy_buf,
-                self.ky_buf,
-                self.bz_buf,
-                self.cz_buf,
-                self.kz_buf,
-                self.psi_Ex_y_buf,
-                self.psi_Ex_z_buf,
-                self.psi_Ey_x_buf,
-                self.psi_Ey_z_buf,
-                self.psi_Ez_x_buf,
-                self.psi_Ez_y_buf,
             )
-        else:
-            self.kern_update_E_pml(
-                self.queue,
-                self._gs_full,
-                self._ls_update,
-                nx,
-                ny,
-                nz,
-                np.int32(0),
-                self.ce_buf,
-                self.Hx_buf,
-                self.Hy_buf,
-                self.Hz_buf,
-                self.Ex_buf,
-                self.Ey_buf,
-                self.Ez_buf,
-                self.bx_buf,
-                self.cx_buf,
-                self.kx_buf,
-                self.by_buf,
-                self.cy_buf,
-                self.ky_buf,
-                self.bz_buf,
-                self.cz_buf,
-                self.kz_buf,
-                self.psi_Ex_y_buf,
-                self.psi_Ex_z_buf,
-                self.psi_Ey_x_buf,
-                self.psi_Ey_z_buf,
-                self.psi_Ez_x_buf,
-                self.psi_Ez_y_buf,
-            )
+        self.kern_update_E_pml(
+            self.queue,
+            self._gs_shell,
+            self._ls_shell,
+            nx,
+            ny,
+            nz,
+            npml,
+            *self._shell_args,
+            self.ce_buf,
+            self.Hx_buf,
+            self.Hy_buf,
+            self.Hz_buf,
+            self.Ex_buf,
+            self.Ey_buf,
+            self.Ez_buf,
+            self.bx_buf,
+            self.cx_buf,
+            self.kx_buf,
+            self.by_buf,
+            self.cy_buf,
+            self.ky_buf,
+            self.bz_buf,
+            self.cz_buf,
+            self.kz_buf,
+            self.psi_Ex_y_buf,
+            self.psi_Ex_z_buf,
+            self.psi_Ey_x_buf,
+            self.psi_Ey_z_buf,
+            self.psi_Ez_x_buf,
+            self.psi_Ez_y_buf,
+        )
 
     def step(self):
         """Single timestep Yee-update with sources and monitors."""

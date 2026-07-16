@@ -39,9 +39,36 @@ __kernel void update_H_interior(
     Hz[idx] -= dtm_dl * (dEy_dx - dEx_dy);
 }
 
+/* Map a packed shell index onto (i,j,k) via slab metadata:
+ * slabs[7*s + 0..6] = start offset, i0, j0, k0, di, dj, dk.
+ * Slabs partition the PML shell (or the full grid when npml == 0), so one
+ * 1-D launch covers exactly the shell cells with no interior no-op threads. */
+inline int shell_ijk(
+    int t, int n_slabs,
+    __global const int * restrict slabs,
+    int *i, int *j, int *k
+) {
+    int s = 0;
+    for (int q = 1; q < n_slabs; ++q) {
+        if (slabs[7 * q] <= t) s = q;
+    }
+    int base = 7 * s;
+    int loc = t - slabs[base + 0];
+    int dj = slabs[base + 5];
+    int dk = slabs[base + 6];
+    int jq = loc / dk;
+    *k = slabs[base + 3] + (loc - jq * dk);
+    int iq = jq / dj;
+    *j = slabs[base + 2] + (jq - iq * dj);
+    *i = slabs[base + 1] + iq;
+    return s;
+}
+
 __kernel void update_H_pml(
     int Nx, int Ny, int Nz,
     int npml,
+    int n_shell, int n_slabs,
+    __global const int * restrict slabs,
     float dtm,
     __global const float * restrict Ex,
     __global const float * restrict Ey,
@@ -57,18 +84,10 @@ __kernel void update_H_pml(
     __global float * restrict psi_Hy_x, __global float * restrict psi_Hy_z,
     __global float * restrict psi_Hz_x, __global float * restrict psi_Hz_y
 ) {
-    int k = get_global_id(0);
-    int j = get_global_id(1);
-    int i = get_global_id(2);
-
-    if (i >= Nx || j >= Ny || k >= Nz) return;
-
-    if (npml > 0 &&
-        i >= npml && i < Nx - npml &&
-        j >= npml && j < Ny - npml &&
-        k >= npml && k < Nz - npml) {
-        return;
-    }
+    int t = get_global_id(0);
+    if (t >= n_shell) return;
+    int i, j, k;
+    shell_ijk(t, n_slabs, slabs, &i, &j, &k);
 
     int idx = i * Ny * Nz + j * Nz + k;
 
@@ -150,9 +169,12 @@ __kernel void update_E_interior(
     Ez[idx] += coeff * (dHy_dx - dHx_dy);
 }
 
+/* Same packed-shell mapping as update_H_pml. */
 __kernel void update_E_pml(
     int Nx, int Ny, int Nz,
     int npml,
+    int n_shell, int n_slabs,
+    __global const int * restrict slabs,
     __global const float * restrict ce,  /* dt / (eps0 * eps_r), precomputed */
     __global const float * restrict Hx,
     __global const float * restrict Hy,
@@ -168,18 +190,10 @@ __kernel void update_E_pml(
     __global float * restrict psi_Ey_x, __global float * restrict psi_Ey_z,
     __global float * restrict psi_Ez_x, __global float * restrict psi_Ez_y
 ) {
-    int k = get_global_id(0);
-    int j = get_global_id(1);
-    int i = get_global_id(2);
-
-    if (i >= Nx || j >= Ny || k >= Nz) return;
-
-    if (npml > 0 &&
-        i >= npml && i < Nx - npml &&
-        j >= npml && j < Ny - npml &&
-        k >= npml && k < Nz - npml) {
-        return;
-    }
+    int t = get_global_id(0);
+    if (t >= n_shell) return;
+    int i, j, k;
+    shell_ijk(t, n_slabs, slabs, &i, &j, &k);
 
     int idx = i * Ny * Nz + j * Nz + k;
 
