@@ -12,7 +12,8 @@ import unittest
 
 import numpy as np
 from opencl_fdtd_solver import NumPyFDTD, NumPyNear2FarMonitor, OpenCLFDTD, OpenCLNear2FarMonitor
-from opencl_fdtd_solver.monitors import ETA0, Near2FarBase, _poynting_db, _poynting_mag
+from opencl_fdtd_solver.constants import ETA0
+from opencl_fdtd_solver.monitors import Near2FarBase, _poynting_db, _poynting_mag
 
 
 class TestPoyntingHelpers(unittest.TestCase):

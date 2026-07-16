@@ -130,7 +130,7 @@ class TestOpenCLEngineBasics(unittest.TestCase):
 
     def test_add_source_jx_matches_soft_delta_e(self):
         """Jx inject equals Ex soft-add of -dt/(ε₀ εᵣ) J on the sheet."""
-        from opencl_fdtd_solver.engine import EPS0
+        from opencl_fdtd_solver.constants import EPS0
 
         shape = (16, 16, 16)
         dl = 1e-3
@@ -156,7 +156,7 @@ class TestOpenCLEngineBasics(unittest.TestCase):
 
     def test_add_source_jx_rim_taper_weights(self):
         """Rim taper: interior=1, edge=rim_edge, corner=rim_edge² (no renorm)."""
-        from opencl_fdtd_solver.engine import EPS0
+        from opencl_fdtd_solver.constants import EPS0
 
         shape = (16, 16, 16)
         npml = 2
@@ -234,7 +234,7 @@ class TestNumPyEngine(unittest.TestCase):
 
     def test_add_source_jx_matches_soft_delta_e(self):
         """NumPy Jx inject equals Ex soft-add of -dt/(ε₀ εᵣ) J on the sheet."""
-        from opencl_fdtd_solver.numpy_engine import EPS0
+        from opencl_fdtd_solver.constants import EPS0
 
         shape = (16, 16, 16)
         dl = 1e-3
@@ -259,7 +259,7 @@ class TestNumPyEngine(unittest.TestCase):
 
     def test_add_source_jx_rim_taper_weights(self):
         """NumPy rim taper: interior=1, edge=rim_edge, corner=rim_edge² (no renorm)."""
-        from opencl_fdtd_solver.numpy_engine import EPS0
+        from opencl_fdtd_solver.constants import EPS0
 
         shape = (16, 16, 16)
         npml = 2
