@@ -16,6 +16,8 @@
 # You should have received a copy of the GNU General Public License
 # along with opencl-fdtd-solver.  If not, see <http://www.gnu.org/licenses/>.
 
+import logging
+
 import numpy as np
 import pyopencl as cl
 
@@ -107,7 +109,9 @@ class OpenCLFDTD(SourceMonitorMixin):
         else:
             self.queue = queue
 
-        print(f"OpenCL FDTD Solver initialized on device: {self.device.name}")
+        logging.getLogger(__name__).info(
+            "OpenCL FDTD Solver initialized on device: %s", self.device.name
+        )
 
         self._check_device_memory(shape, self.npml, self.dtype)
 
@@ -597,7 +601,7 @@ class OpenCLFDTD(SourceMonitorMixin):
         for i in range(n_steps):
             self.step()
             if progress_every and i % progress_every == 0:
-                print(f"  step {i}/{n_steps}  t={self.t:.3e} s", flush=True)
+                logging.getLogger(__name__).info("  step %d/%d  t=%.3e s", i, n_steps, self.t)
 
     # ── CPU Host properties to read Yee fields from GPU (NumPy compatibility) ──
     def _read_field(self, buf):
