@@ -37,7 +37,17 @@ def main() -> None:
     if root not in sys.path:
         sys.path.insert(0, root)
 
-    cov = coverage.Coverage(source=["opencl_fdtd_solver"], branch=True)
+    # CUDA engine is an optional extra (CuPy/NVRTC). CI has no NVIDIA GPU, so
+    # omit those modules from the 90% gate; they are covered by
+    # tests.test_cuda_solver when ``.[cuda]`` is installed locally.
+    cov = coverage.Coverage(
+        source=["opencl_fdtd_solver"],
+        branch=True,
+        omit=[
+            "*/cuda_engine.py",
+            "*/cuda_monitors.py",
+        ],
+    )
     cov.start()
     suite = unittest.defaultTestLoader.loadTestsFromNames(SUITES)
     result = unittest.TextTestRunner(verbosity=2).run(suite)

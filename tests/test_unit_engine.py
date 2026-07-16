@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import os
+import sys
 import unittest
 from contextlib import redirect_stdout
 from unittest import mock
@@ -48,6 +49,26 @@ class TestPackageMetadata(unittest.TestCase):
         # Basic step should run (delegated to base for now)
         sim.step()
 
+    def test_cuda_lazy_export_unknown_raises(self):
+        import opencl_fdtd_solver
+
+        with self.assertRaises(AttributeError):
+            getattr(opencl_fdtd_solver, "NotARealExport")
+
+    def test_cuda_lazy_export_resolves_via_importlib(self):
+        """Lazy CUDA exports must not import cupy at package import time."""
+        import opencl_fdtd_solver
+
+        fake = type(sys)("opencl_fdtd_solver.cuda_engine")
+        fake.CUDAFDTD = object()
+        # Drop any cached real export so __getattr__ runs again.
+        opencl_fdtd_solver.__dict__.pop("CUDAFDTD", None)
+        with mock.patch("importlib.import_module", return_value=fake) as imp:
+            got = opencl_fdtd_solver.CUDAFDTD
+        self.assertIs(got, fake.CUDAFDTD)
+        imp.assert_called_once_with("opencl_fdtd_solver.cuda_engine")
+        opencl_fdtd_solver.__dict__.pop("CUDAFDTD", None)
+
 
 class TestKernelSources(unittest.TestCase):
     def test_packaged_cl_files_exist_and_list_kernels(self):
@@ -57,6 +78,15 @@ class TestKernelSources(unittest.TestCase):
             self.assertIn(f"__kernel void {name}", src, name)
         # Macro line-continuations must be single backslashes (not Python-escaped).
         self.assertRegex(src, r"#define DFT_ACC\(CUR, PREV\) \\\n")
+
+    def test_packaged_cuda_files_load(self):
+        from opencl_fdtd_solver.kernels import CUDA_KERNEL_FILES, load_cuda_kernel_source
+
+        src = load_cuda_kernel_source()
+        self.assertEqual(CUDA_KERNEL_FILES, ("yee_update.cu", "sources.cu", "dft_farfield.cu"))
+        self.assertIn("update_H_interior", src)
+        self.assertIn("__global__", src)
+        self.assertIn("-Dreal=", src)
 
     def test_opencl_program_builds(self):
         os.environ.setdefault("PYOPENCL_CTX", "0")
