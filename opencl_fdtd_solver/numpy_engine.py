@@ -18,12 +18,8 @@
 
 import numpy as np
 
+from .constants import C0, EPS0, ETA0, MU0
 from .plugin import SourceMonitorMixin
-
-C0 = 299_792_458.0
-MU0 = 4e-7 * np.pi
-EPS0 = 1.0 / (MU0 * C0**2)
-ETA0 = np.sqrt(MU0 / EPS0)
 
 
 class NumPyFDTD(SourceMonitorMixin):
