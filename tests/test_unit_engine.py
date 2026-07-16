@@ -121,7 +121,7 @@ class TestOpenCLEngineBasics(unittest.TestCase):
     def test_npml_zero_runs(self):
         fdtd = OpenCLFDTD((20, 20, 20), 1e-3, npml=0)
         self.assertEqual(fdtd.psi_x_size, 0)
-        fdtd._sources.append(lambda f: f.add_source_Ex(10, 0.1))
+        fdtd.add_source(lambda f: f.add_source_Ex(10, 0.1))
         fdtd.run(5)
         fdtd.queue.finish()
         ex = fdtd.Ex
@@ -142,7 +142,7 @@ class TestOpenCLEngineBasics(unittest.TestCase):
         eps = np.ones(shape, dtype=np.float32)
         eps[8, 8, z] = 4.0
         fdtd.set_epsilon(eps)
-        fdtd._sources.append(
+        fdtd.add_source(
             lambda f: f.add_source_Jx(z, Jx, i0=p, i1=shape[0] - p, j0=p, j1=shape[1] - p)
         )
         fdtd.step()
@@ -167,7 +167,7 @@ class TestOpenCLEngineBasics(unittest.TestCase):
         i1 = shape[0] - p
         j1 = shape[1] - p
         fdtd = OpenCLFDTD(shape, 1e-3, npml=npml)
-        fdtd._sources.append(
+        fdtd.add_source(
             lambda f: f.add_source_Jx(
                 z,
                 Jx,
@@ -224,8 +224,8 @@ class TestNumPyEngine(unittest.TestCase):
         cl_sim = OpenCLFDTD(shape, dl, npml=npml)
         z = shape[2] - npml - 2
 
-        np_sim._sources.append(lambda f: f.add_source_Ex(z, np.sin(2 * np.pi * freq * f.t)))
-        cl_sim._sources.append(lambda f: f.add_source_Ex(z, np.sin(2 * np.pi * freq * f.t)))
+        np_sim.add_source(lambda f: f.add_source_Ex(z, np.sin(2 * np.pi * freq * f.t)))
+        cl_sim.add_source(lambda f: f.add_source_Ex(z, np.sin(2 * np.pi * freq * f.t)))
         np_sim.run(20)
         cl_sim.run(20)
         for field in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
@@ -246,7 +246,7 @@ class TestNumPyEngine(unittest.TestCase):
         eps = np.ones(shape, dtype=np.float32)
         eps[8, 8, z] = 4.0
         fdtd.set_epsilon(eps)
-        fdtd._sources.append(
+        fdtd.add_source(
             lambda f: f.add_source_Jx(z, Jx, i0=p, i1=shape[0] - p, j0=p, j1=shape[1] - p)
         )
         fdtd.step()
@@ -270,7 +270,7 @@ class TestNumPyEngine(unittest.TestCase):
         i1 = shape[0] - p
         j1 = shape[1] - p
         fdtd = NumPyFDTD(shape, 1e-3, npml=npml)
-        fdtd._sources.append(
+        fdtd.add_source(
             lambda f: f.add_source_Jx(
                 z,
                 Jx,
@@ -322,8 +322,8 @@ class TestNumPyEngine(unittest.TestCase):
                 rim_renorm=True,
             )
 
-        np_sim._sources.append(src)
-        cl_sim._sources.append(src)
+        np_sim.add_source(src)
+        cl_sim.add_source(src)
         np_sim.run(15)
         cl_sim.run(15)
         for field in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
@@ -340,9 +340,34 @@ class TestNumPyEngine(unittest.TestCase):
     def test_monitor_callback_invoked(self):
         sim = NumPyFDTD((12, 12, 12), 1e-3, npml=2)
         hits = []
-        sim._monitors.append(lambda f: hits.append(f.step_num))
+        sim.add_monitor(lambda f: hits.append(f.step_num))
         sim.run(3)
         self.assertEqual(hits, [1, 2, 3])
+
+    def test_add_source_rejects_non_callable(self):
+        sim = NumPyFDTD((8, 8, 8), 1e-3, npml=1)
+        with self.assertRaises(TypeError):
+            sim.add_source(None)  # type: ignore[arg-type]
+
+    def test_add_and_clear_sources(self):
+        sim = NumPyFDTD((8, 8, 8), 1e-3, npml=1)
+        hits = []
+        sim.add_source(lambda f: hits.append("src"))
+        sim.step()
+        self.assertEqual(hits, ["src"])
+        sim.clear_sources()
+        sim.step()
+        self.assertEqual(hits, ["src"])
+
+    def test_add_and_clear_monitors(self):
+        sim = NumPyFDTD((8, 8, 8), 1e-3, npml=1)
+        hits = []
+        sim.add_monitor(lambda f: hits.append("mon"))
+        sim.step()
+        self.assertEqual(hits, ["mon"])
+        sim.clear_monitors()
+        sim.step()
+        self.assertEqual(hits, ["mon"])
 
 
 class TestDeviceSelectionFallbacks(unittest.TestCase):

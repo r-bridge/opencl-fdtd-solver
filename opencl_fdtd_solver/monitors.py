@@ -192,7 +192,7 @@ class NumPyNear2FarMonitor(Near2FarBase):
         self.Hx_dft = np.zeros(shape, dtype=np.complex64)
         self.Hy_dft = np.zeros(shape, dtype=np.complex64)
         self.Hz_dft = np.zeros(shape, dtype=np.complex64)
-        fdtd._monitors.append(self)
+        fdtd.add_monitor(self)
 
     def __call__(self, fdtd):
         phase = np.exp(1j * self.omega * fdtd.t) * fdtd.dt
@@ -295,7 +295,7 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         self._ny_i32 = np.int32(fdtd.Ny)
         self._nz_i32 = np.int32(fdtd.Nz)
 
-        fdtd._monitors.append(self)
+        fdtd.add_monitor(self)
 
     def _dft_bufs(self):
         return (

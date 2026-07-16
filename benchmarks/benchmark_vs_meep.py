@@ -103,7 +103,7 @@ def run_opencl_benchmark(
         amp = np.exp(-0.5 * ((f.t - t0) / sigma) ** 2) * np.sin(2 * np.pi * freq * f.t)
         f.add_source_Ex(z_src, amp)
 
-    fdtd._sources.append(source_cb)
+    fdtd.add_source(source_cb)
 
     cells = shape[0] * shape[1] * shape[2]
     fdtd.run(warmup)

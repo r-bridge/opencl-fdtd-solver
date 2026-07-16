@@ -133,7 +133,7 @@ def run_opencl_planes(case: PlaneCase) -> dict[int, np.ndarray]:
             rim_taper=True,
         )
 
-    fdtd._sources.append(source_cb)
+    fdtd.add_source(source_cb)
     want = set(case.checkpoints)
     out: dict[int, np.ndarray] = {}
     j_mid = ny // 2
