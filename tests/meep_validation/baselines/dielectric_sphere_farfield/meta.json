@@ -1,9 +1,9 @@
 {
   "courant": 0.5715767664977295,
   "discrepancy": {
-    "main_lobe_max_abs_db_error": 0.62530857,
+    "main_lobe_max_abs_db_error": 0.8349296,
     "meep_null_ratio": 1.8161653e-05,
-    "opencl_null_ratio": 0.02438465
+    "opencl_null_ratio": 0.025347183
   },
   "dl_m": 0.002,
   "files": [
