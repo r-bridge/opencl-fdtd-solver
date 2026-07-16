@@ -11,9 +11,8 @@ import os
 import unittest
 
 import numpy as np
-
-from opencl_fdtd_solver import OpenCLFDTD, NumPyFDTD, NumPyNear2FarMonitor, OpenCLNear2FarMonitor
-from opencl_fdtd_solver.monitors import Near2FarBase, _poynting_db, _poynting_mag, ETA0
+from opencl_fdtd_solver import NumPyFDTD, NumPyNear2FarMonitor, OpenCLFDTD, OpenCLNear2FarMonitor
+from opencl_fdtd_solver.monitors import ETA0, Near2FarBase, _poynting_db, _poynting_mag
 
 
 class TestPoyntingHelpers(unittest.TestCase):
@@ -157,9 +156,7 @@ class TestOpenCLNear2FarMonitor(unittest.TestCase):
         shape = (16, 16, 16)
         dl = 1e-3
         fdtd = OpenCLFDTD(shape, dl, npml=2)
-        fdtd._sources.append(
-            lambda f: f.add_source_Ex(8, 0.05 * np.sin(2 * np.pi * 5e9 * f.t))
-        )
+        fdtd._sources.append(lambda f: f.add_source_Ex(8, 0.05 * np.sin(2 * np.pi * 5e9 * f.t)))
         mon = OpenCLNear2FarMonitor(fdtd, (8e-3, 8e-3, 8e-3), (2e-3, 2e-3, 2e-3), 5e9)
         self.assertLess(mon.n_face_samples, 256)
 

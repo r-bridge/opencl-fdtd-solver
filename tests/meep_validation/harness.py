@@ -181,9 +181,7 @@ def run_meep_script(script: str) -> str:
             ) from e
 
         if not shutil.which("docker"):
-            raise MeepUnavailableError(
-                "Meep is not installed locally and Docker is not available"
-            )
+            raise MeepUnavailableError("Meep is not installed locally and Docker is not available")
         ensure_local_pymeep_image()
         try:
             res = _docker_run(

@@ -15,10 +15,8 @@ from unittest import mock
 
 import numpy as np
 import pyopencl as cl
-
-from opencl_fdtd_solver import OpenCLFDTD, NumPyFDTD
+from opencl_fdtd_solver import NumPyFDTD, OpenCLFDTD
 from opencl_fdtd_solver.kernels import KERNEL_FILES, load_kernel_source
-
 
 EXPECTED_KERNELS = (
     "update_H_interior",
@@ -66,11 +64,9 @@ class TestMemoryEstimate(unittest.TestCase):
     def test_includes_face_local_psi(self):
         shape = (100, 100, 100)
         npml = 10
-        fields = 7 * 100 ** 3 * 4
+        fields = 7 * 100**3 * 4
         psi = (
-            4 * (2 * npml * 100 * 100)
-            + 4 * (100 * 2 * npml * 100)
-            + 4 * (100 * 100 * 2 * npml)
+            4 * (2 * npml * 100 * 100) + 4 * (100 * 2 * npml * 100) + 4 * (100 * 100 * 2 * npml)
         ) * 4
         self.assertEqual(
             OpenCLFDTD.estimate_device_memory_bytes(shape, npml),
@@ -79,7 +75,7 @@ class TestMemoryEstimate(unittest.TestCase):
 
     def test_budget_reserves_headroom(self):
         class _Dev:
-            global_mem_size = 16 * 1024 ** 3
+            global_mem_size = 16 * 1024**3
 
         budget = OpenCLFDTD.device_memory_budget_bytes(_Dev())
         self.assertLess(budget, _Dev.global_mem_size)
@@ -354,20 +350,23 @@ class TestDeviceSelectionFallbacks(unittest.TestCase):
         gpu = mock.Mock()
         gpu.name = "FakeGPU"
         gpu.type = cl.device_type.GPU
-        gpu.global_mem_size = 8 * 1024 ** 3
+        gpu.global_mem_size = 8 * 1024**3
 
         fake_ctx = mock.Mock()
         fake_ctx.devices = [gpu]
         fake_queue = mock.Mock()
 
-        with mock.patch(
-            "opencl_fdtd_solver.engine._default_opencl_runtime",
-            return_value=(fake_ctx, fake_queue, gpu),
-        ), mock.patch.object(OpenCLFDTD, "_check_device_memory"), \
-             mock.patch.object(OpenCLFDTD, "_build_cpml"), \
-             mock.patch.object(OpenCLFDTD, "_compile_kernels"), \
-             mock.patch("opencl_fdtd_solver.engine.cl.Buffer", return_value=mock.Mock()), \
-             mock.patch("opencl_fdtd_solver.engine.cl.enqueue_copy"):
+        with (
+            mock.patch(
+                "opencl_fdtd_solver.engine._default_opencl_runtime",
+                return_value=(fake_ctx, fake_queue, gpu),
+            ),
+            mock.patch.object(OpenCLFDTD, "_check_device_memory"),
+            mock.patch.object(OpenCLFDTD, "_build_cpml"),
+            mock.patch.object(OpenCLFDTD, "_compile_kernels"),
+            mock.patch("opencl_fdtd_solver.engine.cl.Buffer", return_value=mock.Mock()),
+            mock.patch("opencl_fdtd_solver.engine.cl.enqueue_copy"),
+        ):
             fdtd = OpenCLFDTD((8, 8, 8), 1e-3, npml=1)
 
         self.assertIs(fdtd.device, gpu)
