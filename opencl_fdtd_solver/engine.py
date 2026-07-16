@@ -311,7 +311,9 @@ class OpenCLFDTD(SourceMonitorMixin):
         ):
             wg_cap = min(
                 wg_cap,
-                int(kern.get_work_group_info(cl.kernel_work_group_info.WORK_GROUP_SIZE, self.device)),
+                int(
+                    kern.get_work_group_info(cl.kernel_work_group_info.WORK_GROUP_SIZE, self.device)
+                ),
             )
         lk = 128
         while lk > 1 and lk > wg_cap:
