@@ -126,18 +126,20 @@ class OpenCLFDTD(SourceMonitorMixin):
         self.Hx_buf = cl.Buffer(self.ctx, mf.READ_WRITE, self.size * np.dtype(self.dtype).itemsize)
         self.Hy_buf = cl.Buffer(self.ctx, mf.READ_WRITE, self.size * np.dtype(self.dtype).itemsize)
         self.Hz_buf = cl.Buffer(self.ctx, mf.READ_WRITE, self.size * np.dtype(self.dtype).itemsize)
-        self.eps_buf = cl.Buffer(self.ctx, mf.READ_WRITE, self.size * np.dtype(self.dtype).itemsize)
+        # E-update coefficient dt/(eps0*eps_r); one division per cell at
+        # set_epsilon time instead of one per cell per step in the kernels.
+        self.ce_buf = cl.Buffer(self.ctx, mf.READ_WRITE, self.size * np.dtype(self.dtype).itemsize)
 
         # Initialize GPU buffers to default values (fields=0, eps_r=1)
         zeros = np.zeros(self.size, dtype=self.dtype)
-        ones = np.ones(self.size, dtype=self.dtype)
+        ce_vac = np.full(self.size, self.dt / EPS0, dtype=self.dtype)
         cl.enqueue_copy(self.queue, self.Ex_buf, zeros)
         cl.enqueue_copy(self.queue, self.Ey_buf, zeros)
         cl.enqueue_copy(self.queue, self.Ez_buf, zeros)
         cl.enqueue_copy(self.queue, self.Hx_buf, zeros)
         cl.enqueue_copy(self.queue, self.Hy_buf, zeros)
         cl.enqueue_copy(self.queue, self.Hz_buf, zeros)
-        cl.enqueue_copy(self.queue, self.eps_buf, ones)
+        cl.enqueue_copy(self.queue, self.ce_buf, ce_vac)
 
         self._sources = []
         self._monitors = []
@@ -146,14 +148,14 @@ class OpenCLFDTD(SourceMonitorMixin):
         self._compile_kernels()
 
     def set_epsilon(self, eps_array):
-        """Set the 3D permittivity array on the GPU."""
+        """Set the 3D permittivity array on the GPU (stored as dt/(eps0*eps_r))."""
         expected = (self.Nx, self.Ny, self.Nz)
         if eps_array.shape != expected:
             raise ValueError(
                 f"Epsilon shape mismatch: expected {expected}, got {tuple(eps_array.shape)}"
             )
-        eps_flat = eps_array.astype(self.dtype).flatten()
-        cl.enqueue_copy(self.queue, self.eps_buf, eps_flat)
+        ce = (self.dt / (EPS0 * eps_array.astype(np.float64))).astype(self.dtype).flatten()
+        cl.enqueue_copy(self.queue, self.ce_buf, ce)
 
     def _build_cpml(self):
         """Calculate CPML coefficients and allocate face-local psi buffers on the GPU."""
@@ -187,18 +189,23 @@ class OpenCLFDTD(SourceMonitorMixin):
         by, cy, ky = _1d_coeffs(Ny)
         bz, cz, kz = _1d_coeffs(Nz)
 
+        # Kernels multiply by 1/(kappa*dl) instead of dividing by kappa*dl.
+        ikx = (1.0 / (kx.astype(np.float64) * dl)).astype(self.dtype)
+        iky = (1.0 / (ky.astype(np.float64) * dl)).astype(self.dtype)
+        ikz = (1.0 / (kz.astype(np.float64) * dl)).astype(self.dtype)
+
         mf = cl.mem_flags
         self.bx_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=bx)
         self.cx_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=cx)
-        self.kx_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=kx)
+        self.kx_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=ikx)
 
         self.by_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=by)
         self.cy_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=cy)
-        self.ky_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=ky)
+        self.ky_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=iky)
 
         self.bz_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=bz)
         self.cz_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=cz)
-        self.kz_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=kz)
+        self.kz_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=ikz)
 
         # Face-local psi: only the PML slabs where the corresponding c-coeff is nonzero.
         # x-normal faces: 2*npml * Ny * Nz  (Hy_x, Hz_x, Ey_x, Ez_x)
@@ -235,7 +242,7 @@ class OpenCLFDTD(SourceMonitorMixin):
         """Estimated GPU allocation for fields + face-local CPML psi (bytes)."""
         nx, ny, nz = shape
         item = np.dtype(dtype).itemsize
-        fields = 7 * nx * ny * nz * item  # Ex..Hz + eps
+        fields = 7 * nx * ny * nz * item  # Ex..Hz + ce (E-update coefficient)
         if npml <= 0:
             return fields
         psi = (
@@ -412,24 +419,21 @@ class OpenCLFDTD(SourceMonitorMixin):
             np.int32(self.Nz),
             np.int32(z_src),
             np.float32(jx),
-            np.float32(self.dt),
-            np.float32(EPS0),
             np.int32(i0_i),
             np.int32(i1_i),
             np.int32(j0_i),
             np.int32(j1_i),
             np.int32(1 if rim_taper else 0),
             np.float32(re),
-            self.eps_buf,
+            self.ce_buf,
             self.Ex_buf,
         )
 
     def _update_H(self):
-        dtm = self.dt / MU0
         nx, ny, nz = np.int32(self.Nx), np.int32(self.Ny), np.int32(self.Nz)
         npml = np.int32(self.npml)
-        dl = np.float32(self.dl)
-        dtm_f = np.float32(dtm)
+        dtm_f = np.float32(self.dt / MU0)
+        dtm_dl = np.float32(self.dt / (MU0 * self.dl))
 
         if self.npml > 0:
             if self._gs_interior is not None:
@@ -441,8 +445,7 @@ class OpenCLFDTD(SourceMonitorMixin):
                     ny,
                     nz,
                     npml,
-                    dl,
-                    dtm_f,
+                    dtm_dl,
                     self.Ex_buf,
                     self.Ey_buf,
                     self.Ez_buf,
@@ -458,7 +461,6 @@ class OpenCLFDTD(SourceMonitorMixin):
                 ny,
                 nz,
                 npml,
-                dl,
                 dtm_f,
                 self.Ex_buf,
                 self.Ey_buf,
@@ -494,7 +496,6 @@ class OpenCLFDTD(SourceMonitorMixin):
                 ny,
                 nz,
                 np.int32(0),
-                dl,
                 dtm_f,
                 self.Ex_buf,
                 self.Ey_buf,
@@ -522,9 +523,7 @@ class OpenCLFDTD(SourceMonitorMixin):
     def _update_E(self):
         nx, ny, nz = np.int32(self.Nx), np.int32(self.Ny), np.int32(self.Nz)
         npml = np.int32(self.npml)
-        dl = np.float32(self.dl)
-        dt = np.float32(self.dt)
-        eps0 = np.float32(EPS0)
+        inv_dl = np.float32(1.0 / self.dl)
 
         if self.npml > 0:
             if self._gs_interior is not None:
@@ -536,10 +535,8 @@ class OpenCLFDTD(SourceMonitorMixin):
                     ny,
                     nz,
                     npml,
-                    dl,
-                    dt,
-                    eps0,
-                    self.eps_buf,
+                    inv_dl,
+                    self.ce_buf,
                     self.Hx_buf,
                     self.Hy_buf,
                     self.Hz_buf,
@@ -555,10 +552,7 @@ class OpenCLFDTD(SourceMonitorMixin):
                 ny,
                 nz,
                 npml,
-                dl,
-                dt,
-                eps0,
-                self.eps_buf,
+                self.ce_buf,
                 self.Hx_buf,
                 self.Hy_buf,
                 self.Hz_buf,
@@ -590,10 +584,7 @@ class OpenCLFDTD(SourceMonitorMixin):
                 ny,
                 nz,
                 np.int32(0),
-                dl,
-                dt,
-                eps0,
-                self.eps_buf,
+                self.ce_buf,
                 self.Hx_buf,
                 self.Hy_buf,
                 self.Hz_buf,
