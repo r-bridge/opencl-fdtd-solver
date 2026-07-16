@@ -14,7 +14,6 @@ import unittest
 from pathlib import Path
 
 import numpy as np
-
 from tests.meep_validation.farfield_cases import (
     default_farfield_cases,
     load_case_farfields_from_baselines,
@@ -27,7 +26,7 @@ from tests.meep_validation.farfield_metrics import (
     measure_farfield_case,
 )
 from tests.meep_validation.farfield_render import read_png_rgb, write_pattern_overlay_png
-from tests.meep_validation.harness import MeepUnavailableError, OPENCL_COURANT, max_abs_db_error
+from tests.meep_validation.harness import OPENCL_COURANT, MeepUnavailableError, max_abs_db_error
 from tests.meep_validation.plane_cases import baselines_root
 
 
@@ -148,9 +147,7 @@ class TestMeepFarfieldBaselines(unittest.TestCase):
                     expected = read_png_rgb(baseline)
                     actual = read_png_rgb(actual_path)
                 if not np.array_equal(expected, actual):
-                    diff = np.abs(
-                        expected.astype(np.int16) - actual.astype(np.int16)
-                    )
+                    diff = np.abs(expected.astype(np.int16) - actual.astype(np.int16))
                     raise AssertionError(
                         f"{case.name}: PNG pixels differ from baseline "
                         f"(max|Δ|={int(diff.max())}, mean|Δ|={float(diff.mean()):.3f}). "
@@ -186,16 +183,13 @@ class TestMeepFarfieldBaselines(unittest.TestCase):
                 self.assertLess(
                     err,
                     case.max_main_lobe_db,
-                    f"{case.name}: main-lobe |Δ|dB={err:.3f} exceeds gate "
-                    f"{case.max_main_lobe_db}",
+                    f"{case.name}: main-lobe |Δ|dB={err:.3f} exceeds gate {case.max_main_lobe_db}",
                 )
                 for tag, main, null in (
                     ("opencl", ocl["eh_plus_z"], ocl["eh_plus_x"]),
                     ("meep", meep["eh_plus_z"], meep["eh_plus_x"]),
                 ):
-                    r = float(
-                        np.linalg.norm(null[:3]) / (np.linalg.norm(main[:3]) + 1e-30)
-                    )
+                    r = float(np.linalg.norm(null[:3]) / (np.linalg.norm(main[:3]) + 1e-30))
                     self.assertLess(
                         r,
                         0.05,

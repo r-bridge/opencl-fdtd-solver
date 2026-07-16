@@ -19,7 +19,9 @@ def _peak_align_db(db: np.ndarray) -> np.ndarray:
     return a - float(np.max(a))
 
 
-def _draw_polyline(rgb: np.ndarray, xs: np.ndarray, ys: np.ndarray, color: tuple[int, int, int]) -> None:
+def _draw_polyline(
+    rgb: np.ndarray, xs: np.ndarray, ys: np.ndarray, color: tuple[int, int, int]
+) -> None:
     """Bresenham-style segments between consecutive samples (inclusive)."""
     h, w, _ = rgb.shape
     for i in range(len(xs) - 1):
@@ -82,9 +84,7 @@ def write_pattern_overlay_png(
     try:
         from PIL import Image
 
-        Image.fromarray(rgb, mode="RGB").save(
-            path, format="PNG", optimize=False, compress_level=6
-        )
+        Image.fromarray(rgb, mode="RGB").save(path, format="PNG", optimize=False, compress_level=6)
     except ImportError:
         from matplotlib.image import imsave
 

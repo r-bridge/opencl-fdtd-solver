@@ -18,7 +18,6 @@ import unittest
 
 import coverage
 
-
 SUITES = [
     "tests.test_solver",
     "tests.test_unit_engine",

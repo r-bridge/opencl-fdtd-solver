@@ -13,16 +13,15 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from opencl_fdtd_solver.monitors import ETA0
 
 from .cases import (
+    DL,
     FREQ,
     FWIDTH,
     N_STEPS,
     NPML,
     SHAPE,
-    DL,
     _sphere_eps,
     eh_from_list,
     run_meep_farfield_pattern,
@@ -37,7 +36,6 @@ from .farfield_metrics import (
 from .farfield_render import write_pattern_overlay_png
 from .harness import OPENCL_COURANT
 from .plane_cases import baselines_root
-
 
 N_ANGLES = 19
 

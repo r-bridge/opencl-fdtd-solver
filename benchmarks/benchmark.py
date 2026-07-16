@@ -18,8 +18,9 @@
 
 import os
 import time
+
 import numpy as np
-from opencl_fdtd_solver import OpenCLFDTD, NumPyFDTD, OpenCLNear2FarMonitor, NumPyNear2FarMonitor
+from opencl_fdtd_solver import NumPyFDTD, NumPyNear2FarMonitor, OpenCLFDTD, OpenCLNear2FarMonitor
 
 
 def run_benchmark(shape=(100, 100, 100), steps=50, warmup=5):
@@ -30,14 +31,14 @@ def run_benchmark(shape=(100, 100, 100), steps=50, warmup=5):
     freq = 6e9
 
     print("=" * 60)
-    print(f"FDTD Performance Benchmark ({Nx}x{Ny}x{Nz} = {total_cells/1e6:.2f}M cells)")
+    print(f"FDTD Performance Benchmark ({Nx}x{Ny}x{Nz} = {total_cells / 1e6:.2f}M cells)")
     print("=" * 60)
 
     # 1. Benchmark NumPy CPU reference
     print("\n--- [1/2] Benchmarking NumPy CPU Reference ---")
     np_sim = NumPyFDTD(shape, dl, npml=npml)
     z_src = shape[2] - npml - 2
-    np_sim._sources.append(lambda f: setattr(f, 'Ex', f.Ex + np.sin(2 * np.pi * freq * f.t)))
+    np_sim._sources.append(lambda f: setattr(f, "Ex", f.Ex + np.sin(2 * np.pi * freq * f.t)))
 
     ctr_phys = (Nx * dl / 2, Ny * dl / 2, Nz * dl / 2)
     size_phys = (Nx * dl * 0.6, Ny * dl * 0.6, Nz * dl * 0.6)
@@ -52,7 +53,7 @@ def run_benchmark(shape=(100, 100, 100), steps=50, warmup=5):
 
     # 2. Benchmark OpenCL GPU/CPU
     print("\n--- [2/2] Benchmarking OpenCL Solver ---")
-    os.environ['PYOPENCL_CTX'] = os.environ.get('PYOPENCL_CTX', '0')
+    os.environ["PYOPENCL_CTX"] = os.environ.get("PYOPENCL_CTX", "0")
     try:
         cl_sim = OpenCLFDTD(shape, dl, npml=npml)
     except MemoryError as exc:
@@ -72,7 +73,7 @@ def run_benchmark(shape=(100, 100, 100), steps=50, warmup=5):
     print("\n" + "=" * 60)
     print("Benchmark Comparison Summary:")
     print("=" * 60)
-    print(f"Grid size: {total_cells/1e6:.2f}M cells, {steps} steps (after {warmup}-step warm-up)")
+    print(f"Grid size: {total_cells / 1e6:.2f}M cells, {steps} steps (after {warmup}-step warm-up)")
     print(f"NumPy CPU:  {np_duration:7.4f}s ({np_mcups:6.2f} MCUPS)")
     print(f"OpenCL:     {cl_duration:7.4f}s ({cl_mcups:6.2f} MCUPS)")
     speedup = np_duration / cl_duration
@@ -80,5 +81,5 @@ def run_benchmark(shape=(100, 100, 100), steps=50, warmup=5):
     print("=" * 60 + "\n")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_benchmark()

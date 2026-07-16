@@ -28,7 +28,7 @@ from __future__ import annotations
 import unittest
 
 import numpy as np
-
+from opencl_fdtd_solver.monitors import ETA0
 from tests.meep_validation import (
     MeepUnavailableError,
     complex_align,
@@ -36,6 +36,7 @@ from tests.meep_validation import (
     peak_normalize,
 )
 from tests.meep_validation.cases import (
+    _sphere_eps,
     eh_from_list,
     run_meep_farfield_pattern,
     run_meep_nearfield_dft,
@@ -43,9 +44,7 @@ from tests.meep_validation.cases import (
     run_opencl_farfield_pattern,
     run_opencl_nearfield_dft,
     run_opencl_pml_decay,
-    _sphere_eps,
 )
-from opencl_fdtd_solver.monitors import ETA0
 
 
 def _require_meep_callable():

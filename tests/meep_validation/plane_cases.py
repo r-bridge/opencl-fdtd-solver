@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from opencl_fdtd_solver import OpenCLFDTD
 
 from .harness import (
@@ -374,7 +373,9 @@ def write_case_baselines(
         np.save(dest / f"ocl_ex_step{step:04d}.npy", np.asarray(ocl[step], dtype=np.float32))
         np.save(dest / f"meep_ex_step{step:04d}.npy", np.asarray(meep[step], dtype=np.float32))
         meta["files"].append(png.name)
-    (dest / "meta.json").write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (dest / "meta.json").write_text(
+        json.dumps(meta, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     report = case_report_dict(
         name=case.name,
         shape=list(case.shape),

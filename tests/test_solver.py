@@ -17,9 +17,9 @@
 # along with opencl-fdtd-solver.  If not, see <http://www.gnu.org/licenses/>.
 
 import unittest
+
 import numpy as np
-import pyopencl as cl
-from opencl_fdtd_solver import OpenCLFDTD, NumPyFDTD, NumPyNear2FarMonitor, OpenCLNear2FarMonitor
+from opencl_fdtd_solver import NumPyFDTD, NumPyNear2FarMonitor, OpenCLFDTD, OpenCLNear2FarMonitor
 
 
 class TestGenericFDTDSolver(unittest.TestCase):
@@ -28,7 +28,7 @@ class TestGenericFDTDSolver(unittest.TestCase):
         self.dl = 2e-3  # 2 mm
         self.npml = 6
         self.freq = 5e9  # 5 GHz
-        
+
         # Build dummy permittivity profile (dielectric sphere at the center)
         self.eps = np.ones(self.shape, dtype=np.float32)
         ctr = 15
@@ -36,7 +36,7 @@ class TestGenericFDTDSolver(unittest.TestCase):
         for i in range(self.shape[0]):
             for j in range(self.shape[1]):
                 for k in range(self.shape[2]):
-                    if (i - ctr)**2 + (j - ctr)**2 + (k - ctr)**2 < rad**2:
+                    if (i - ctr) ** 2 + (j - ctr) ** 2 + (k - ctr) ** 2 < rad**2:
                         self.eps[i, j, k] = 4.0
 
     def test_numpy_vs_opencl_engine_fields(self):
@@ -44,7 +44,7 @@ class TestGenericFDTDSolver(unittest.TestCase):
         # Initialize both solvers
         np_sim = NumPyFDTD(self.shape, self.dl, npml=self.npml)
         cl_sim = OpenCLFDTD(self.shape, self.dl, npml=self.npml)
-        
+
         np_sim.set_epsilon(self.eps)
         cl_sim.set_epsilon(self.eps)
 
@@ -68,11 +68,11 @@ class TestGenericFDTDSolver(unittest.TestCase):
             cl_sim.step()
 
         # Check maximum difference across all field components
-        for field in ['Ex', 'Ey', 'Ez', 'Hx', 'Hy', 'Hz']:
+        for field in ["Ex", "Ey", "Ez", "Hx", "Hy", "Hz"]:
             np_field = getattr(np_sim, field)
             cl_field = getattr(cl_sim, field)
             diff = np.max(np.abs(np_field - cl_field))
-            
+
             # Non-zero validation
             self.assertGreater(np.max(np.abs(np_field)), 0.0, f"NumPy field {field} is zero!")
             # Precision tolerance
@@ -117,5 +117,5 @@ class TestGenericFDTDSolver(unittest.TestCase):
         self.assertTrue(np.all(np.isfinite(db)))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
