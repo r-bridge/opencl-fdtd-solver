@@ -28,7 +28,7 @@ from __future__ import annotations
 import unittest
 
 import numpy as np
-from opencl_fdtd_solver.monitors import ETA0
+from opencl_fdtd_solver.constants import ETA0
 from tests.meep_validation import (
     MeepUnavailableError,
     complex_align,

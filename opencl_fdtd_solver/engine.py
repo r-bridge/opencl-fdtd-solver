@@ -19,13 +19,9 @@
 import numpy as np
 import pyopencl as cl
 
+from .constants import C0, EPS0, ETA0, MU0
 from .kernels import load_kernel_source
 from .plugin import SourceMonitorMixin
-
-C0 = 299_792_458.0
-MU0 = 4e-7 * np.pi
-EPS0 = 1.0 / (MU0 * C0**2)
-ETA0 = np.sqrt(MU0 / EPS0)
 
 # Reuse one context/queue for default OpenCLFDTD construction. Creating a new
 # cl.Context per instance is fine on discrete GPUs but can segfault POCL (CI)
