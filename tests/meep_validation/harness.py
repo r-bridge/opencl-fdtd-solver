@@ -16,10 +16,8 @@ import tempfile
 from typing import Any
 
 import numpy as np
+from opencl_fdtd_solver.constants import C0, EPS0
 
-C0 = 299_792_458.0
-MU0 = 4e-7 * np.pi
-EPS0 = 1.0 / (MU0 * C0**2)
 # Match OpenCLFDTD: dt = S * dl / c with S = 0.99/sqrt(3). Meep default is 0.5.
 OPENCL_COURANT = 0.99 / float(np.sqrt(3.0))
 # Length unit used in Meep comparison scripts (metres per Meep length unit).

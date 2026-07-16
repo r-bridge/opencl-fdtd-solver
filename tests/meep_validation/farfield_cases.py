@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from opencl_fdtd_solver.monitors import ETA0
+from opencl_fdtd_solver.constants import ETA0
 
 from .cases import (
     DL,
