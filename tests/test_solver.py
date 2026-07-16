@@ -104,8 +104,8 @@ class TestGenericFDTDSolver(unittest.TestCase):
             ff_cl = cl_mon.get_farfield(obs)
             diff = np.max(np.abs(ff_np - ff_cl))
             self.assertGreater(np.max(np.abs(ff_cl)), 0.0, f"OpenCL far-field at {obs} is zero")
-            # Edge DFT differs slightly (NumPy double-counts shared edges); allow modest gap.
-            self.assertLess(diff, 5e-3, f"Far-field mismatch at {obs}: {diff:.6e}")
+            # Face-packed NumPy and OpenCL paths should now agree closely.
+            self.assertLess(diff, 5e-4, f"Far-field mismatch at {obs}: {diff:.6e}")
 
         # Face-only download is much smaller than a full volume.
         n_cells = self.shape[0] * self.shape[1] * self.shape[2]

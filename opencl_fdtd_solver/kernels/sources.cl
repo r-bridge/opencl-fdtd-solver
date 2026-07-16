@@ -29,7 +29,7 @@ __kernel void add_source_Jx(
     int i0, int i1, int j0, int j1,
     int rim_taper,
     float rim_edge,
-    __global const float * restrict ce,  /* dt / (eps0 * eps_r), precomputed */
+    __global const float * restrict ce_x,  /* dt/(eps0*eps_r) at Ex edges */
     __global float * restrict Ex
 ) {
     int j = get_global_id(0);
@@ -45,5 +45,5 @@ __kernel void add_source_Jx(
     }
 
     int idx = i * Ny * Nz + j * Nz + z_src;
-    Ex[idx] += -ce[idx] * Jx * w;
+    Ex[idx] += -ce_x[idx] * Jx * w;
 }

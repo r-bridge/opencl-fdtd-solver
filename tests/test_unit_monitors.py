@@ -191,7 +191,17 @@ class TestNumPyNear2FarMonitor(unittest.TestCase):
         size = (10 * dl,) * 3
         mon = NumPyNear2FarMonitor(fdtd, ctr, size, freq)
         fdtd.run(30)
-        self.assertGreater(float(np.max(np.abs(mon.Ex_dft))), 0.0)
+        face_power = float(
+            max(
+                np.max(np.abs(mon.Ex_dft_f)),
+                np.max(np.abs(mon.Ey_dft_f)),
+                np.max(np.abs(mon.Ez_dft_f)),
+                np.max(np.abs(mon.Hx_dft_f)),
+                np.max(np.abs(mon.Hy_dft_f)),
+                np.max(np.abs(mon.Hz_dft_f)),
+            )
+        )
+        self.assertGreater(face_power, 0.0)
         ff = mon.get_farfield((0.0, 0.0, 50.0))
         self.assertEqual(ff.shape, (6,))
         self.assertGreater(float(np.max(np.abs(ff))), 0.0)

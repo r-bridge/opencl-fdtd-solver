@@ -70,7 +70,7 @@ class TestMemoryEstimate(unittest.TestCase):
     def test_fields_only_when_npml_zero(self):
         shape = (40, 50, 60)
         item = 4
-        expected = 7 * 40 * 50 * 60 * item
+        expected = 9 * 40 * 50 * 60 * item
         self.assertEqual(
             OpenCLFDTD.estimate_device_memory_bytes(shape, npml=0),
             expected,
@@ -79,7 +79,7 @@ class TestMemoryEstimate(unittest.TestCase):
     def test_includes_face_local_psi(self):
         shape = (100, 100, 100)
         npml = 10
-        fields = 7 * 100**3 * 4
+        fields = 9 * 100**3 * 4
         psi = (
             4 * (2 * npml * 100 * 100) + 4 * (100 * 2 * npml * 100) + 4 * (100 * 100 * 2 * npml)
         ) * 4
@@ -120,20 +120,21 @@ class TestOpenCLEngineBasics(unittest.TestCase):
 
     def test_set_epsilon_roundtrip(self):
         from opencl_fdtd_solver.constants import EPS0
+        from opencl_fdtd_solver.materials import yee_edge_ce
 
         fdtd = OpenCLFDTD((12, 12, 12), 1e-3, npml=2)
         eps = np.ones((12, 12, 12), dtype=np.float32)
         eps[6, 6, 6] = 4.0
         fdtd.set_epsilon(eps)
         host = np.empty(12 * 12 * 12, dtype=np.float32)
-        cl.enqueue_copy(fdtd.queue, host, fdtd.ce_buf)
+        cl.enqueue_copy(fdtd.queue, host, fdtd.ce_x_buf)
         fdtd.queue.finish()
-        # Device stores the E-update coefficient dt/(eps0*eps_r).
-        ce = host.reshape(12, 12, 12)
-        expected_eps4 = fdtd.dt / (EPS0 * 4.0)
-        expected_vac = fdtd.dt / EPS0
-        self.assertAlmostEqual(float(ce[6, 6, 6]) / expected_eps4, 1.0, places=6)
-        self.assertAlmostEqual(float(ce[0, 0, 0]) / expected_vac, 1.0, places=6)
+        ce_x = host.reshape(12, 12, 12)
+        expect_x, _, _ = yee_edge_ce(eps, fdtd.dt, dtype=np.float32)
+        # Ex-edge at (6,6,6) averages cells 6 and 7 → ε=2.5.
+        self.assertAlmostEqual(float(ce_x[6, 6, 6]), float(expect_x[6, 6, 6]), places=6)
+        self.assertAlmostEqual(float(ce_x[0, 0, 0]), float(fdtd.dt / EPS0), places=6)
+        self.assertAlmostEqual(float(expect_x[6, 6, 6]), float(fdtd.dt / (EPS0 * 2.5)), places=6)
 
     def test_set_epsilon_shape_mismatch(self):
         fdtd = OpenCLFDTD((10, 10, 10), 1e-3, npml=2)
@@ -171,9 +172,9 @@ class TestOpenCLEngineBasics(unittest.TestCase):
         fdtd.step()
         fdtd.queue.finish()
         ex = fdtd.Ex
-        soft_eps4 = -float(fdtd.dt) / (float(EPS0) * 4.0) * Jx
+        soft_edge = -float(fdtd.dt) / (float(EPS0) * 2.5) * Jx
         soft_vac = -float(fdtd.dt) / float(EPS0) * Jx
-        self.assertAlmostEqual(float(ex[8, 8, z]), soft_eps4, places=6)
+        self.assertAlmostEqual(float(ex[8, 8, z]), soft_edge, places=6)
         self.assertAlmostEqual(float(ex[p, p, z]), soft_vac, places=6)
         self.assertEqual(float(ex[0, 0, z]), 0.0)  # outside sheet (in PML)
 
@@ -310,9 +311,9 @@ class TestNumPyEngine(unittest.TestCase):
         )
         fdtd.step()
         ex = fdtd.Ex
-        soft_eps4 = -float(fdtd.dt) / (float(EPS0) * 4.0) * Jx
+        soft_edge = -float(fdtd.dt) / (float(EPS0) * 2.5) * Jx
         soft_vac = -float(fdtd.dt) / float(EPS0) * Jx
-        self.assertAlmostEqual(float(ex[8, 8, z]), soft_eps4, places=6)
+        self.assertAlmostEqual(float(ex[8, 8, z]), soft_edge, places=6)
         self.assertAlmostEqual(float(ex[p, p, z]), soft_vac, places=6)
         self.assertEqual(float(ex[0, 0, z]), 0.0)  # outside sheet (in PML)
 

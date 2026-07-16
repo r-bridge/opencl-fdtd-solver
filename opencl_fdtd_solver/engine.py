@@ -17,12 +17,14 @@
 # along with opencl-fdtd-solver.  If not, see <http://www.gnu.org/licenses/>.
 
 import logging
+import warnings
 
 import numpy as np
 import pyopencl as cl
 
 from .constants import C0, EPS0, ETA0, MU0
 from .kernels import load_kernel_source
+from .materials import yee_edge_ce
 from .plugin import SourceMonitorMixin
 
 # Reuse one context/queue for default OpenCLFDTD construction. Creating a new
@@ -126,9 +128,13 @@ class OpenCLFDTD(SourceMonitorMixin):
         self.Hx_buf = cl.Buffer(self.ctx, mf.READ_WRITE, self.size * np.dtype(self.dtype).itemsize)
         self.Hy_buf = cl.Buffer(self.ctx, mf.READ_WRITE, self.size * np.dtype(self.dtype).itemsize)
         self.Hz_buf = cl.Buffer(self.ctx, mf.READ_WRITE, self.size * np.dtype(self.dtype).itemsize)
-        # E-update coefficient dt/(eps0*eps_r); one division per cell at
-        # set_epsilon time instead of one per cell per step in the kernels.
-        self.ce_buf = cl.Buffer(self.ctx, mf.READ_WRITE, self.size * np.dtype(self.dtype).itemsize)
+        # Per-component E-update coefficients dt/(eps0*eps_r) at Yee edges.
+        nbytes = self.size * np.dtype(self.dtype).itemsize
+        self.ce_x_buf = cl.Buffer(self.ctx, mf.READ_WRITE, nbytes)
+        self.ce_y_buf = cl.Buffer(self.ctx, mf.READ_WRITE, nbytes)
+        self.ce_z_buf = cl.Buffer(self.ctx, mf.READ_WRITE, nbytes)
+        # Alias: Ex / Jx sources use the Ex-edge coefficient.
+        self.ce_buf = self.ce_x_buf
 
         # Initialize GPU buffers to default values (fields=0, eps_r=1)
         zeros = np.zeros(self.size, dtype=self.dtype)
@@ -139,7 +145,9 @@ class OpenCLFDTD(SourceMonitorMixin):
         cl.enqueue_copy(self.queue, self.Hx_buf, zeros)
         cl.enqueue_copy(self.queue, self.Hy_buf, zeros)
         cl.enqueue_copy(self.queue, self.Hz_buf, zeros)
-        cl.enqueue_copy(self.queue, self.ce_buf, ce_vac)
+        cl.enqueue_copy(self.queue, self.ce_x_buf, ce_vac)
+        cl.enqueue_copy(self.queue, self.ce_y_buf, ce_vac)
+        cl.enqueue_copy(self.queue, self.ce_z_buf, ce_vac)
 
         self._sources = []
         self._monitors = []
@@ -148,14 +156,16 @@ class OpenCLFDTD(SourceMonitorMixin):
         self._compile_kernels()
 
     def set_epsilon(self, eps_array):
-        """Set the 3D permittivity array on the GPU (stored as dt/(eps0*eps_r))."""
+        """Set cell-centered ``εᵣ``; store Yee-edge ``ce = dt/(ε₀ εᵣ)`` on the GPU."""
         expected = (self.Nx, self.Ny, self.Nz)
         if eps_array.shape != expected:
             raise ValueError(
                 f"Epsilon shape mismatch: expected {expected}, got {tuple(eps_array.shape)}"
             )
-        ce = (self.dt / (EPS0 * eps_array.astype(np.float64))).astype(self.dtype).flatten()
-        cl.enqueue_copy(self.queue, self.ce_buf, ce)
+        ce_x, ce_y, ce_z = yee_edge_ce(eps_array, self.dt, dtype=self.dtype)
+        cl.enqueue_copy(self.queue, self.ce_x_buf, ce_x.ravel())
+        cl.enqueue_copy(self.queue, self.ce_y_buf, ce_y.ravel())
+        cl.enqueue_copy(self.queue, self.ce_z_buf, ce_z.ravel())
 
     def _build_cpml(self):
         """Calculate CPML coefficients and allocate face-local psi buffers on the GPU."""
@@ -242,7 +252,7 @@ class OpenCLFDTD(SourceMonitorMixin):
         """Estimated GPU allocation for fields + face-local CPML psi (bytes)."""
         nx, ny, nz = shape
         item = np.dtype(dtype).itemsize
-        fields = 7 * nx * ny * nz * item  # Ex..Hz + ce (E-update coefficient)
+        fields = 9 * nx * ny * nz * item  # Ex..Hz + ce_x/y/z (Yee-edge coeffs)
         if npml <= 0:
             return fields
         psi = (
@@ -351,6 +361,11 @@ class OpenCLFDTD(SourceMonitorMixin):
         sheet (default: full XY, including PML). Use interior-only bounds when
         matching Meep sources that stop at the PML.
         """
+        warnings.warn(
+            "add_source_Ex is a legacy Ex soft-add; prefer add_source_Jx for SI current density",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         i0_i = 0 if i0 is None else int(i0)
         i1_i = self.Nx if i1 is None else int(i1)
         j0_i = 0 if j0 is None else int(j0)
@@ -524,6 +539,7 @@ class OpenCLFDTD(SourceMonitorMixin):
         nx, ny, nz = np.int32(self.Nx), np.int32(self.Ny), np.int32(self.Nz)
         npml = np.int32(self.npml)
         inv_dl = np.float32(1.0 / self.dl)
+        ce = (self.ce_x_buf, self.ce_y_buf, self.ce_z_buf)
 
         if self.npml > 0:
             if self._gs_interior is not None:
@@ -536,7 +552,7 @@ class OpenCLFDTD(SourceMonitorMixin):
                     nz,
                     npml,
                     inv_dl,
-                    self.ce_buf,
+                    *ce,
                     self.Hx_buf,
                     self.Hy_buf,
                     self.Hz_buf,
@@ -552,7 +568,7 @@ class OpenCLFDTD(SourceMonitorMixin):
                 ny,
                 nz,
                 npml,
-                self.ce_buf,
+                *ce,
                 self.Hx_buf,
                 self.Hy_buf,
                 self.Hz_buf,
@@ -584,7 +600,7 @@ class OpenCLFDTD(SourceMonitorMixin):
                 ny,
                 nz,
                 np.int32(0),
-                self.ce_buf,
+                *ce,
                 self.Hx_buf,
                 self.Hy_buf,
                 self.Hz_buf,
@@ -611,8 +627,12 @@ class OpenCLFDTD(SourceMonitorMixin):
     def step(self):
         """Single timestep Yee-update with sources and monitors."""
         self._update_H()
+        # Soft currents belong at (n+1/2)Δt in the leapfrog E update.
+        t_int = self.t
+        self.t = t_int + 0.5 * self.dt
         for src in self._sources:
             src(self)
+        self.t = t_int
         self._update_E()
         self.t += self.dt
         self.step_num += 1
