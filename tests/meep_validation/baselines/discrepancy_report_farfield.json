@@ -10,9 +10,9 @@
       ],
       "max_main_lobe_db": 2.5,
       "metrics": {
-        "main_lobe_max_abs_db_error": 0.69652689,
+        "main_lobe_max_abs_db_error": 0.46229967,
         "meep_null_ratio": 1.8117464e-05,
-        "opencl_null_ratio": 0.026485177
+        "opencl_null_ratio": 0.027637866
       },
       "n_angles": 19,
       "n_steps": 500,
@@ -36,9 +36,9 @@
       ],
       "max_main_lobe_db": 3.0,
       "metrics": {
-        "main_lobe_max_abs_db_error": 2.8404971,
-        "meep_null_ratio": 6.2177041e-06,
-        "opencl_null_ratio": 0.035692917
+        "main_lobe_max_abs_db_error": 0.62530857,
+        "meep_null_ratio": 1.8161653e-05,
+        "opencl_null_ratio": 0.02438465
       },
       "n_angles": 19,
       "n_steps": 500,
@@ -50,7 +50,7 @@
         30
       ],
       "sphere_eps": 4.0,
-      "sphere_rad_cells": 6
+      "sphere_rad_cells": 4
     }
   ],
   "description": "Objective comparison of XZ far-field |S|(\u03b8) and null depth between OpenCLNear2FarMonitor and Meep Near2Far on shared compact-patch cases.",

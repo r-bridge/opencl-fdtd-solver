@@ -18,7 +18,7 @@ Objective comparison of XZ far-field |S|(θ) and null depth between OpenCLNear2F
 
 | main lobe |Δ|dB | OpenCL null | Meep null |
 |-------------------:|------------:|----------:|
-| 0.696527 | 2.648518e-02 | 1.811746e-05 |
+| 0.462300 | 2.763787e-02 | 1.811746e-05 |
 
 ### Images
 
@@ -28,13 +28,13 @@ Objective comparison of XZ far-field |S|(θ) and null depth between OpenCLNear2F
 
 - Grid `(30, 30, 30)`, dl=0.002 m, npml=6, n_steps=500, n_angles=19
 - Source freq=5000000000.0 Hz, fwidth=1000000000.0 Hz; Courant=0.5715767664977295
-- Sphere ε=4.0, rad_cells=6; main-lobe gate < 3.0 dB
+- Sphere ε=4.0, rad_cells=4; main-lobe gate < 3.0 dB
 
 ### Summary
 
 | main lobe |Δ|dB | OpenCL null | Meep null |
 |-------------------:|------------:|----------:|
-| 2.840497 | 3.569292e-02 | 6.217704e-06 |
+| 0.625309 | 2.438465e-02 | 1.816165e-05 |
 
 ### Images
 

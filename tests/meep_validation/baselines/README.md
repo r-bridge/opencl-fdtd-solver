@@ -30,7 +30,7 @@ Compact Ex patch + Huygens box (same geometry as live `test_meep_validation` far
 | Case | Features exercised |
 |------|--------------------|
 | `vacuum_farfield` | N2F XZ pattern + EH null depth |
-| `dielectric_sphere_farfield` | Same + centered ε=4 sphere |
+| `dielectric_sphere_farfield` | Same + centered ε=4 sphere (radius 8 mm, **inside** Huygens box at 10 mm half-extent; Meep `eps_averaging=True` ↔ OpenCL Yee-edge ε) |
 
 **Evidence** (CI-enforced):
 
