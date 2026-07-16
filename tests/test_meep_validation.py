@@ -151,11 +151,15 @@ class TestMeepValidation(unittest.TestCase):
             self.assertLess(r, 0.05, f"{name} |E(+x)|/|E(+z)|={r:.3e} (expected null)")
 
     def test_04_dielectric_sphere_farfield_pattern(self):
-        """εᵣ=4 sphere: far-field pattern shape vs Meep (main lobe)."""
+        """εᵣ=4 sphere (inside Huygens box): far-field pattern shape vs Meep (main lobe)."""
+        from tests.meep_validation.cases import SPHERE_RAD_CELLS, SPHERE_RADIUS_MM
+
         n_ang = 19
-        eps = _sphere_eps(4.0, rad_cells=6)
+        eps = _sphere_eps(4.0, rad_cells=SPHERE_RAD_CELLS)
         cl = run_opencl_farfield_pattern(n_angles=n_ang, eps=eps)
-        mp = run_meep_farfield_pattern(n_angles=n_ang, eps_sphere=4.0)
+        mp = run_meep_farfield_pattern(
+            n_angles=n_ang, eps_sphere=4.0, sphere_radius_mm=SPHERE_RADIUS_MM
+        )
 
         err = max_abs_db_error(
             np.asarray(cl["S_db"], dtype=np.float64),

@@ -121,7 +121,9 @@ __kernel void update_E_interior(
     int Nx, int Ny, int Nz,
     int npml,
     float inv_dl,
-    __global const float * restrict ce,  /* dt / (eps0 * eps_r), precomputed */
+    __global const float * restrict ce_x,  /* dt/(eps0*eps_r) at Ex edges */
+    __global const float * restrict ce_y,
+    __global const float * restrict ce_z,
     __global const float * restrict Hx,
     __global const float * restrict Hy,
     __global const float * restrict Hz,
@@ -144,16 +146,17 @@ __kernel void update_E_interior(
     float dHy_dx = Hy[idx] - Hy[idx - Ny * Nz];
     float dHx_dy = Hx[idx] - Hx[idx - Nz];
 
-    float coeff = ce[idx] * inv_dl;
-    Ex[idx] += coeff * (dHz_dy - dHy_dz);
-    Ey[idx] += coeff * (dHx_dz - dHz_dx);
-    Ez[idx] += coeff * (dHy_dx - dHx_dy);
+    Ex[idx] += ce_x[idx] * inv_dl * (dHz_dy - dHy_dz);
+    Ey[idx] += ce_y[idx] * inv_dl * (dHx_dz - dHz_dx);
+    Ez[idx] += ce_z[idx] * inv_dl * (dHy_dx - dHx_dy);
 }
 
 __kernel void update_E_pml(
     int Nx, int Ny, int Nz,
     int npml,
-    __global const float * restrict ce,  /* dt / (eps0 * eps_r), precomputed */
+    __global const float * restrict ce_x,  /* dt/(eps0*eps_r) at Ex edges */
+    __global const float * restrict ce_y,
+    __global const float * restrict ce_z,
     __global const float * restrict Hx,
     __global const float * restrict Hy,
     __global const float * restrict Hz,
@@ -223,8 +226,7 @@ __kernel void update_E_pml(
         psi_Ey_z[zi] = p_Ey_z;
     }
 
-    float coeff = ce[idx];
-    Ex[idx] += coeff * (dHz_dy * iky[j] + p_Ex_y - dHy_dz * ikz[k] - p_Ex_z);
-    Ey[idx] += coeff * (dHx_dz * ikz[k] + p_Ey_z - dHz_dx * ikx[i] - p_Ey_x);
-    Ez[idx] += coeff * (dHy_dx * ikx[i] + p_Ez_x - dHx_dy * iky[j] - p_Ez_y);
+    Ex[idx] += ce_x[idx] * (dHz_dy * iky[j] + p_Ex_y - dHy_dz * ikz[k] - p_Ex_z);
+    Ey[idx] += ce_y[idx] * (dHx_dz * ikz[k] + p_Ey_z - dHz_dx * ikx[i] - p_Ey_x);
+    Ez[idx] += ce_z[idx] * (dHy_dx * ikx[i] + p_Ez_x - dHx_dy * iky[j] - p_Ez_y);
 }
