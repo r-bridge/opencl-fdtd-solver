@@ -10,10 +10,14 @@ setup(
     install_requires=[
         "numpy",
         "pyopencl",
-        "h5py",
-        "scipy",
-        "matplotlib"
     ],
+    extras_require={
+        "test": [
+            "matplotlib",
+            "pillow",
+            "coverage",
+        ],
+    },
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",

@@ -25,8 +25,9 @@ The mathematical formulations for the Yee-grid field updates and the Convolution
 Ensure you have an OpenCL platform (NVIDIA CUDA, AMD, Intel, or POCL) installed, then:
 
 ```bash
-pip install numpy pyopencl h5py scipy matplotlib
 pip install -e .
+# Optional: Meep baseline / coverage tooling
+pip install -e ".[test]"
 ```
 
 For GPU runs, point PyOpenCL at your GPU platform (often `0` for NVIDIA CUDA):
