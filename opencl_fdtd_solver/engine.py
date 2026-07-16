@@ -23,7 +23,8 @@ import warnings
 import numpy as np
 import pyopencl as cl
 
-from .constants import C0, EPS0, ETA0, MU0
+from .constants import C0, EPS0, MU0
+from .cpml import build_cpml_profiles
 from .kernels import load_kernel_source
 from .materials import yee_edge_ce
 from .plugin import SourceMonitorMixin
@@ -190,52 +191,36 @@ class OpenCLFDTD(SourceMonitorMixin):
     def _build_cpml(self):
         """Calculate CPML coefficients and allocate face-local psi buffers on the GPU."""
         dl = self.dl
-        dt = self.dt
         npml = self.npml
         Nx, Ny, Nz = self.Nx, self.Ny, self.Nz
 
-        m = 3
-        sigma_opt = 0.8 * (m + 1) / (2.0 * ETA0 * dl * npml) if npml > 0 else 0.0
-        alpha_max = 0.05 / ETA0
+        profiles = build_cpml_profiles((Nx, Ny, Nz), npml=npml, dl=dl, dt=self.dt, dtype=self.dtype)
 
-        def _1d_coeffs(n):
-            b = np.ones(n, dtype=self.dtype)
-            c = np.zeros(n, dtype=self.dtype)
-            k = np.ones(n, dtype=self.dtype)
-            for i in range(npml):
-                for lo, idx in ((True, i), (False, n - npml + i)):
-                    xi = (npml - i) / npml if lo else (i + 1) / npml
-                    sig = sigma_opt * xi**m
-                    kap = 1.0
-                    alp = alpha_max * (1.0 - xi) ** 1
-                    decay = (sig / kap + alp) * dt / EPS0
-                    b[idx] = np.exp(-decay)
-                    denom = sig + kap * alp
-                    c[idx] = 0.0 if denom == 0 else sig / kap * (b[idx] - 1.0) / denom / dl
-                    k[idx] = kap
-            return b, c, k
-
-        bx, cx, kx = _1d_coeffs(Nx)
-        by, cy, ky = _1d_coeffs(Ny)
-        bz, cz, kz = _1d_coeffs(Nz)
-
-        # Kernels multiply by 1/(kappa*dl) instead of dividing by kappa*dl.
-        ikx = (1.0 / (kx.astype(np.float64) * dl)).astype(self.dtype)
-        iky = (1.0 / (ky.astype(np.float64) * dl)).astype(self.dtype)
-        ikz = (1.0 / (kz.astype(np.float64) * dl)).astype(self.dtype)
+        def _ik(kappa: np.ndarray) -> np.ndarray:
+            # Kernels multiply by 1/(kappa*dl) instead of dividing by kappa*dl.
+            return (1.0 / (kappa.astype(np.float64) * dl)).astype(self.dtype)
 
         mf = cl.mem_flags
-        self.bx_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=bx)
-        self.cx_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=cx)
-        self.kx_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=ikx)
 
-        self.by_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=by)
-        self.cy_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=cy)
-        self.ky_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=iky)
+        def _upload_axis(prof):
+            return (
+                cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=prof.b),
+                cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=prof.c),
+                cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=_ik(prof.kappa)),
+            )
 
-        self.bz_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=bz)
-        self.cz_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=cz)
-        self.kz_buf = cl.Buffer(self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=ikz)
+        # H-update uses H-node stagger; E-update uses E-node stagger.
+        self.bx_h_buf, self.cx_h_buf, self.kx_h_buf = _upload_axis(profiles.h[0])
+        self.by_h_buf, self.cy_h_buf, self.ky_h_buf = _upload_axis(profiles.h[1])
+        self.bz_h_buf, self.cz_h_buf, self.kz_h_buf = _upload_axis(profiles.h[2])
+        self.bx_e_buf, self.cx_e_buf, self.kx_e_buf = _upload_axis(profiles.e[0])
+        self.by_e_buf, self.cy_e_buf, self.ky_e_buf = _upload_axis(profiles.e[1])
+        self.bz_e_buf, self.cz_e_buf, self.kz_e_buf = _upload_axis(profiles.e[2])
+
+        # Back-compat aliases (H-node set): older call sites / tests.
+        self.bx_buf, self.cx_buf, self.kx_buf = self.bx_h_buf, self.cx_h_buf, self.kx_h_buf
+        self.by_buf, self.cy_buf, self.ky_buf = self.by_h_buf, self.cy_h_buf, self.ky_h_buf
+        self.bz_buf, self.cz_buf, self.kz_buf = self.bz_h_buf, self.cz_h_buf, self.kz_h_buf
 
         # Face-local psi: only the PML slabs where the corresponding c-coeff is nonzero.
         # x-normal faces: 2*npml * Ny * Nz  (Hy_x, Hz_x, Ey_x, Ez_x)
@@ -503,15 +488,15 @@ class OpenCLFDTD(SourceMonitorMixin):
                 self.Hx_buf,
                 self.Hy_buf,
                 self.Hz_buf,
-                self.bx_buf,
-                self.cx_buf,
-                self.kx_buf,
-                self.by_buf,
-                self.cy_buf,
-                self.ky_buf,
-                self.bz_buf,
-                self.cz_buf,
-                self.kz_buf,
+                self.bx_h_buf,
+                self.cx_h_buf,
+                self.kx_h_buf,
+                self.by_h_buf,
+                self.cy_h_buf,
+                self.ky_h_buf,
+                self.bz_h_buf,
+                self.cz_h_buf,
+                self.kz_h_buf,
                 self.psi_Hx_y_buf,
                 self.psi_Hx_z_buf,
                 self.psi_Hy_x_buf,
@@ -538,15 +523,15 @@ class OpenCLFDTD(SourceMonitorMixin):
                 self.Hx_buf,
                 self.Hy_buf,
                 self.Hz_buf,
-                self.bx_buf,
-                self.cx_buf,
-                self.kx_buf,
-                self.by_buf,
-                self.cy_buf,
-                self.ky_buf,
-                self.bz_buf,
-                self.cz_buf,
-                self.kz_buf,
+                self.bx_h_buf,
+                self.cx_h_buf,
+                self.kx_h_buf,
+                self.by_h_buf,
+                self.cy_h_buf,
+                self.ky_h_buf,
+                self.bz_h_buf,
+                self.cz_h_buf,
+                self.kz_h_buf,
                 self.psi_Hx_y_buf,
                 self.psi_Hx_z_buf,
                 self.psi_Hy_x_buf,
@@ -595,15 +580,15 @@ class OpenCLFDTD(SourceMonitorMixin):
                 self.Ex_buf,
                 self.Ey_buf,
                 self.Ez_buf,
-                self.bx_buf,
-                self.cx_buf,
-                self.kx_buf,
-                self.by_buf,
-                self.cy_buf,
-                self.ky_buf,
-                self.bz_buf,
-                self.cz_buf,
-                self.kz_buf,
+                self.bx_e_buf,
+                self.cx_e_buf,
+                self.kx_e_buf,
+                self.by_e_buf,
+                self.cy_e_buf,
+                self.ky_e_buf,
+                self.bz_e_buf,
+                self.cz_e_buf,
+                self.kz_e_buf,
                 self.psi_Ex_y_buf,
                 self.psi_Ex_z_buf,
                 self.psi_Ey_x_buf,
@@ -627,15 +612,15 @@ class OpenCLFDTD(SourceMonitorMixin):
                 self.Ex_buf,
                 self.Ey_buf,
                 self.Ez_buf,
-                self.bx_buf,
-                self.cx_buf,
-                self.kx_buf,
-                self.by_buf,
-                self.cy_buf,
-                self.ky_buf,
-                self.bz_buf,
-                self.cz_buf,
-                self.kz_buf,
+                self.bx_e_buf,
+                self.cx_e_buf,
+                self.kx_e_buf,
+                self.by_e_buf,
+                self.cy_e_buf,
+                self.ky_e_buf,
+                self.bz_e_buf,
+                self.cz_e_buf,
+                self.kz_e_buf,
                 self.psi_Ex_y_buf,
                 self.psi_Ex_z_buf,
                 self.psi_Ey_x_buf,

@@ -26,6 +26,7 @@ SUITES = [
     "tests.test_unit_plane_render",
     "tests.test_unit_plane_metrics",
     "tests.test_unit_farfield_baselines",
+    "tests.test_unit_cpml",
     "tests.test_analytic_validation",
 ]
 
