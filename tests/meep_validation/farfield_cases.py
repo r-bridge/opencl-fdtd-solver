@@ -22,6 +22,7 @@ from .cases import (
     N_STEPS,
     NPML,
     SHAPE,
+    SPHERE_RAD_CELLS,
     _sphere_eps,
     eh_from_list,
     run_meep_farfield_pattern,
@@ -46,8 +47,9 @@ class FarfieldCase:
 
     name: str
     # None ⇒ vacuum; else sphere ε_r and OpenCL radial extent in cells.
+    # Sphere must fit inside the Huygens box (see cases.N2F_HALF_M).
     sphere_eps: float | None = None
-    sphere_rad_cells: int = 6
+    sphere_rad_cells: int = SPHERE_RAD_CELLS
     # Main-lobe |Δ|dB gate (matches test_meep_validation).
     max_main_lobe_db: float = 2.5
 
@@ -62,7 +64,7 @@ def default_farfield_cases() -> list[FarfieldCase]:
         FarfieldCase(
             name="dielectric_sphere_farfield",
             sphere_eps=4.0,
-            sphere_rad_cells=6,
+            sphere_rad_cells=SPHERE_RAD_CELLS,
             max_main_lobe_db=3.0,
         ),
     ]
@@ -91,7 +93,12 @@ def run_opencl_farfield_case(case: FarfieldCase) -> dict[str, Any]:
 
 def run_meep_farfield_case(case: FarfieldCase) -> dict[str, Any]:
     eps_sphere = float(case.sphere_eps) if case.has_dielectric else None
-    raw = run_meep_farfield_pattern(n_angles=N_ANGLES, eps_sphere=eps_sphere)
+    sphere_radius_mm = float(case.sphere_rad_cells) * (DL * 1e3) if case.has_dielectric else None
+    raw = run_meep_farfield_pattern(
+        n_angles=N_ANGLES,
+        eps_sphere=eps_sphere,
+        sphere_radius_mm=sphere_radius_mm,
+    )
     return {
         "angles_deg": np.asarray(raw["angles_deg"], dtype=np.float64),
         "S_db": np.asarray(raw["S_db"], dtype=np.float64),

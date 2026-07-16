@@ -4,12 +4,12 @@ Objective comparison of mid-plane Ex between this OpenCL Yee/CPML solver and Mee
 
 ## Metric definitions
 
-- **`pearson_corr`:** Pearson correlation of signed Ex after least-squares scaling Meep onto OpenCL (shape/phase agreement; amplitude removed).
-- **`lms_scale`:** Least-squares scale such that OpenCL ≈ scale · Meep. Near 1.0 means absolute amplitude agreement after source matching.
-- **`raw_residual_energy_ratio`:** ∑(OpenCL−Meep)² / ∑OpenCL² without amplitude alignment.
 - **`aligned_residual_energy_ratio`:** ∑(OpenCL−scale·Meep)² / ∑OpenCL² after LMS scale.
-- **`peak_ratio`:** peak|OpenCL| / peak|Meep| on the non-PML mask.
+- **`lms_scale`:** Least-squares scale such that OpenCL ≈ scale · Meep. Near 1.0 means absolute amplitude agreement after source matching.
 - **`mid_x_lag_cells`:** Integer lag maximizing mid-x lineout cross-correlation (Meep shifted relative to OpenCL).
+- **`peak_ratio`:** peak|OpenCL| / peak|Meep| on the non-PML mask.
+- **`pearson_corr`:** Pearson correlation of signed Ex after least-squares scaling Meep onto OpenCL (shape/phase agreement; amplitude removed).
+- **`raw_residual_energy_ratio`:** ∑(OpenCL−Meep)² / ∑OpenCL² without amplitude alignment.
 
 ## Case `vacuum_sheet`
 
@@ -21,16 +21,16 @@ Objective comparison of mid-plane Ex between this OpenCL Yee/CPML solver and Mee
 
 | mean corr | mean LMS scale | mean raw res/E | mean aligned res/E | max \|lag\| |
 |----------:|---------------:|---------------:|-------------------:|----------:|
-| 0.978587 | 1.006145 | 0.034095 | 0.033289 | 1 |
+| 0.984133 | 1.008894 | 0.024665 | 0.024327 | 0 |
 
 ### Checkpoints
 
 | step | corr | LMS scale | raw res/E | aligned res/E | peak_ocl | peak_meep | peak ratio | lag |
 |-----:|-----:|----------:|----------:|--------------:|---------:|----------:|-----------:|----:|
-| 20 | 0.988962 | 1.044069 | 0.017430 | 0.015676 | 9.987610e-06 | 7.450646e-06 | 1.340502 | 0 |
-| 40 | 0.992396 | 1.015346 | 0.011852 | 0.011626 | 3.496311e-05 | 2.744870e-05 | 1.273762 | 0 |
-| 60 | 0.978308 | 1.000490 | 0.033978 | 0.033978 | 1.419041e-04 | 1.120245e-04 | 1.266723 | 0 |
-| 80 | 0.954683 | 0.964676 | 0.073120 | 0.071875 | 4.710418e-04 | 3.845247e-04 | 1.224998 | 1 |
+| 20 | 0.989282 | 1.031302 | 0.015841 | 0.014933 | 9.820905e-06 | 7.450646e-06 | 1.318128 | 0 |
+| 40 | 0.994227 | 1.011017 | 0.008749 | 0.008631 | 3.483506e-05 | 2.744870e-05 | 1.269097 | 0 |
+| 60 | 0.986216 | 1.009122 | 0.021473 | 0.021393 | 1.431888e-04 | 1.120245e-04 | 1.278192 | 0 |
+| 80 | 0.966805 | 0.984136 | 0.052597 | 0.052351 | 4.805993e-04 | 3.845247e-04 | 1.249853 | 0 |
 
 ### Images
 
@@ -49,16 +49,16 @@ Objective comparison of mid-plane Ex between this OpenCL Yee/CPML solver and Mee
 
 | mean corr | mean LMS scale | mean raw res/E | mean aligned res/E | max \|lag\| |
 |----------:|---------------:|---------------:|-------------------:|----------:|
-| 0.979517 | 1.009896 | 0.031212 | 0.030622 | 1 |
+| 0.984414 | 1.009701 | 0.023304 | 0.023058 | 0 |
 
 ### Checkpoints
 
 | step | corr | LMS scale | raw res/E | aligned res/E | peak_ocl | peak_meep | peak ratio | lag |
 |-----:|-----:|----------:|----------:|--------------:|---------:|----------:|-----------:|----:|
-| 20 | 0.988773 | 1.044010 | 0.017786 | 0.016037 | 9.987610e-06 | 7.450646e-06 | 1.340502 | 0 |
-| 40 | 0.991205 | 1.012096 | 0.013415 | 0.013274 | 3.499759e-05 | 2.749041e-05 | 1.273084 | 0 |
-| 60 | 0.978830 | 1.004891 | 0.031935 | 0.031912 | 1.423327e-04 | 1.125635e-04 | 1.264466 | 0 |
-| 80 | 0.959260 | 0.978586 | 0.061714 | 0.061265 | 4.725061e-04 | 3.867935e-04 | 1.221598 | 1 |
+| 20 | 0.989101 | 1.030053 | 0.016222 | 0.015383 | 9.820905e-06 | 7.450646e-06 | 1.318128 | 0 |
+| 40 | 0.993674 | 1.004433 | 0.009427 | 0.009408 | 3.490921e-05 | 2.749041e-05 | 1.269869 | 0 |
+| 60 | 0.985711 | 1.009961 | 0.021474 | 0.021378 | 1.437417e-04 | 1.125635e-04 | 1.276983 | 0 |
+| 80 | 0.969169 | 0.994355 | 0.046093 | 0.046062 | 4.825437e-04 | 3.867935e-04 | 1.247549 | 0 |
 
 ### Images
 

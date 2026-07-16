@@ -114,7 +114,8 @@ __kernel void accumulate_dft_faces_fused(
     int iz0, int iz1,
     int off0, int off1, int off2, int off3, int off4, int off5,
     int n_face,
-    float phase_real, float phase_imag,
+    float phase_e_real, float phase_e_imag,
+    float phase_h_real, float phase_h_imag,
     __global const float * restrict Ex,
     __global const float * restrict Ey,
     __global const float * restrict Ez,
@@ -158,25 +159,68 @@ __kernel void accumulate_dft_faces_fused(
     (void)nxf;
 
     int idx = abs_i * Ny * Nz + abs_j * Nz + abs_k;
-    float pr = phase_real, pi = phase_imag;
+    float pr_e = phase_e_real, pi_e = phase_e_imag;
+    float pr_h = phase_h_real, pi_h = phase_h_imag;
 
-/* Tangential only (same components as face_sample_NL). */
+/* Co-locate tangential E/H at the face-center (half-cell averages), then DFT.
+ * H uses phase_h = phase_e * exp(-j ω Δt/2): at monitor time E is at
+ * integer t while H is still at (n+1/2)Δt after the leapfrog update. */
+#define AT(F, ii, jj, kk) ((F)[((ii) * Ny + (jj)) * Nz + (kk)])
+#define AVG2(a, b, ok) ((ok) ? 0.5f * ((a) + (b)) : (a))
     if (face <= 1) {
-        dft_add(&Ey_dft[face_i], Ey[idx], pr, pi);
-        dft_add(&Ez_dft[face_i], Ez[idx], pr, pi);
-        dft_add(&Hy_dft[face_i], Hy[idx], pr, pi);
-        dft_add(&Hz_dft[face_i], Hz[idx], pr, pi);
+        /* Face center (i, j+½, k+½): avg Ey in z, Ez in y; H from both sides of face. */
+        int k1 = (abs_k + 1 < Nz) ? abs_k + 1 : abs_k;
+        int j1 = (abs_j + 1 < Ny) ? abs_j + 1 : abs_j;
+        int i_lo = (abs_i > 0) ? abs_i - 1 : abs_i;
+        float ey = AVG2(AT(Ey, abs_i, abs_j, abs_k), AT(Ey, abs_i, abs_j, k1), k1 != abs_k);
+        float ez = AVG2(AT(Ez, abs_i, abs_j, abs_k), AT(Ez, abs_i, j1, abs_k), j1 != abs_j);
+        float hy00 = AT(Hy, abs_i, abs_j, abs_k), hy10 = AT(Hy, i_lo, abs_j, abs_k);
+        float hy01 = AT(Hy, abs_i, j1, abs_k), hy11 = AT(Hy, i_lo, j1, abs_k);
+        float hz00 = AT(Hz, abs_i, abs_j, abs_k), hz10 = AT(Hz, i_lo, abs_j, abs_k);
+        float hz01 = AT(Hz, abs_i, abs_j, k1), hz11 = AT(Hz, i_lo, abs_j, k1);
+        float hy = 0.25f * (hy00 + hy10 + hy01 + hy11);
+        float hz = 0.25f * (hz00 + hz10 + hz01 + hz11);
+        dft_add(&Ey_dft[face_i], ey, pr_e, pi_e);
+        dft_add(&Ez_dft[face_i], ez, pr_e, pi_e);
+        dft_add(&Hy_dft[face_i], hy, pr_h, pi_h);
+        dft_add(&Hz_dft[face_i], hz, pr_h, pi_h);
     } else if (face <= 3) {
-        dft_add(&Ex_dft[face_i], Ex[idx], pr, pi);
-        dft_add(&Ez_dft[face_i], Ez[idx], pr, pi);
-        dft_add(&Hx_dft[face_i], Hx[idx], pr, pi);
-        dft_add(&Hz_dft[face_i], Hz[idx], pr, pi);
+        /* Face center (i+½, j, k+½). */
+        int i1 = (abs_i + 1 < Nx) ? abs_i + 1 : abs_i;
+        int k1 = (abs_k + 1 < Nz) ? abs_k + 1 : abs_k;
+        int j_lo = (abs_j > 0) ? abs_j - 1 : abs_j;
+        float ex = AVG2(AT(Ex, abs_i, abs_j, abs_k), AT(Ex, abs_i, abs_j, k1), k1 != abs_k);
+        float ez = AVG2(AT(Ez, abs_i, abs_j, abs_k), AT(Ez, i1, abs_j, abs_k), i1 != abs_i);
+        float hx00 = AT(Hx, abs_i, abs_j, abs_k), hx10 = AT(Hx, abs_i, j_lo, abs_k);
+        float hx01 = AT(Hx, i1, abs_j, abs_k), hx11 = AT(Hx, i1, j_lo, abs_k);
+        float hz00 = AT(Hz, abs_i, abs_j, abs_k), hz10 = AT(Hz, abs_i, j_lo, abs_k);
+        float hz01 = AT(Hz, abs_i, abs_j, k1), hz11 = AT(Hz, abs_i, j_lo, k1);
+        float hx = 0.25f * (hx00 + hx10 + hx01 + hx11);
+        float hz = 0.25f * (hz00 + hz10 + hz01 + hz11);
+        dft_add(&Ex_dft[face_i], ex, pr_e, pi_e);
+        dft_add(&Ez_dft[face_i], ez, pr_e, pi_e);
+        dft_add(&Hx_dft[face_i], hx, pr_h, pi_h);
+        dft_add(&Hz_dft[face_i], hz, pr_h, pi_h);
     } else {
-        dft_add(&Ex_dft[face_i], Ex[idx], pr, pi);
-        dft_add(&Ey_dft[face_i], Ey[idx], pr, pi);
-        dft_add(&Hx_dft[face_i], Hx[idx], pr, pi);
-        dft_add(&Hy_dft[face_i], Hy[idx], pr, pi);
+        /* Face center (i+½, j+½, k). */
+        int i1 = (abs_i + 1 < Nx) ? abs_i + 1 : abs_i;
+        int j1 = (abs_j + 1 < Ny) ? abs_j + 1 : abs_j;
+        int k_lo = (abs_k > 0) ? abs_k - 1 : abs_k;
+        float ex = AVG2(AT(Ex, abs_i, abs_j, abs_k), AT(Ex, abs_i, j1, abs_k), j1 != abs_j);
+        float ey = AVG2(AT(Ey, abs_i, abs_j, abs_k), AT(Ey, i1, abs_j, abs_k), i1 != abs_i);
+        float hx00 = AT(Hx, abs_i, abs_j, abs_k), hx10 = AT(Hx, abs_i, abs_j, k_lo);
+        float hx01 = AT(Hx, abs_i, j1, abs_k), hx11 = AT(Hx, abs_i, j1, k_lo);
+        float hy00 = AT(Hy, abs_i, abs_j, abs_k), hy10 = AT(Hy, abs_i, abs_j, k_lo);
+        float hy01 = AT(Hy, i1, abs_j, abs_k), hy11 = AT(Hy, i1, abs_j, k_lo);
+        float hx = 0.25f * (hx00 + hx10 + hx01 + hx11);
+        float hy = 0.25f * (hy00 + hy10 + hy01 + hy11);
+        dft_add(&Ex_dft[face_i], ex, pr_e, pi_e);
+        dft_add(&Ey_dft[face_i], ey, pr_e, pi_e);
+        dft_add(&Hx_dft[face_i], hx, pr_h, pi_h);
+        dft_add(&Hy_dft[face_i], hy, pr_h, pi_h);
     }
+#undef AT
+#undef AVG2
 }
 
 /*
@@ -306,38 +350,65 @@ inline void face_sample_NL(
         abs_i = ix0 + loc / nyf; abs_j = iy0 + (loc - (loc / nyf) * nyf); abs_k = iz1;
     }
     (void)nxf;
-    xp = abs_i * dl; yp = abs_j * dl; zp = abs_k * dl;
+    /* Surface sample at face-center (half-cell offset in the two tangential axes). */
+    if (face <= 1) {
+        xp = abs_i * dl;
+        yp = (abs_j + 0.5f) * dl;
+        zp = (abs_k + 0.5f) * dl;
+    } else if (face <= 3) {
+        xp = (abs_i + 0.5f) * dl;
+        yp = abs_j * dl;
+        zp = (abs_k + 0.5f) * dl;
+    } else {
+        xp = (abs_i + 0.5f) * dl;
+        yp = (abs_j + 0.5f) * dl;
+        zp = abs_k * dl;
+    }
     int li = face_i;
     float phase = k_wave * (rx * xp + ry * yp + rz * zp);
     float2 ph = (float2)(cos(phase), sin(phase));
+
+    /* Trapezoidal face quadrature: half weight on edges, quarter on corners. */
+    float wj, wk;
+    if (face <= 1) {
+        wj = (abs_j == iy0 || abs_j == iy1) ? 0.5f : 1.0f;
+        wk = (abs_k == iz0 || abs_k == iz1) ? 0.5f : 1.0f;
+    } else if (face <= 3) {
+        wj = (abs_i == ix0 || abs_i == ix1) ? 0.5f : 1.0f;
+        wk = (abs_k == iz0 || abs_k == iz1) ? 0.5f : 1.0f;
+    } else {
+        wj = (abs_i == ix0 || abs_i == ix1) ? 0.5f : 1.0f;
+        wk = (abs_j == iy0 || abs_j == iy1) ? 0.5f : 1.0f;
+    }
+    float dAw = dA * wj * wk;
 
     if (face <= 1) {
         float2 Jy = cmul((float2)( nf * Hz_f[li].x,  nf * Hz_f[li].y), ph);
         float2 Jz = cmul((float2)(-nf * Hy_f[li].x, -nf * Hy_f[li].y), ph);
         float2 My = cmul((float2)(-nf * Ez_f[li].x, -nf * Ez_f[li].y), ph);
         float2 Mz = cmul((float2)( nf * Ey_f[li].x,  nf * Ey_f[li].y), ph);
-        caccum(Ny, (float2)(Jy.x * dA, Jy.y * dA));
-        caccum(Nz, (float2)(Jz.x * dA, Jz.y * dA));
-        caccum(Ly, (float2)(My.x * dA, My.y * dA));
-        caccum(Lz, (float2)(Mz.x * dA, Mz.y * dA));
+        caccum(Ny, (float2)(Jy.x * dAw, Jy.y * dAw));
+        caccum(Nz, (float2)(Jz.x * dAw, Jz.y * dAw));
+        caccum(Ly, (float2)(My.x * dAw, My.y * dAw));
+        caccum(Lz, (float2)(Mz.x * dAw, Mz.y * dAw));
     } else if (face <= 3) {
         float2 Jx = cmul((float2)(-nf * Hz_f[li].x, -nf * Hz_f[li].y), ph);
         float2 Jz = cmul((float2)( nf * Hx_f[li].x,  nf * Hx_f[li].y), ph);
         float2 Mx = cmul((float2)( nf * Ez_f[li].x,  nf * Ez_f[li].y), ph);
         float2 Mz = cmul((float2)(-nf * Ex_f[li].x, -nf * Ex_f[li].y), ph);
-        caccum(Nx, (float2)(Jx.x * dA, Jx.y * dA));
-        caccum(Nz, (float2)(Jz.x * dA, Jz.y * dA));
-        caccum(Lx, (float2)(Mx.x * dA, Mx.y * dA));
-        caccum(Lz, (float2)(Mz.x * dA, Mz.y * dA));
+        caccum(Nx, (float2)(Jx.x * dAw, Jx.y * dAw));
+        caccum(Nz, (float2)(Jz.x * dAw, Jz.y * dAw));
+        caccum(Lx, (float2)(Mx.x * dAw, Mx.y * dAw));
+        caccum(Lz, (float2)(Mz.x * dAw, Mz.y * dAw));
     } else {
         float2 Jx = cmul((float2)( nf * Hy_f[li].x,  nf * Hy_f[li].y), ph);
         float2 Jy = cmul((float2)(-nf * Hx_f[li].x, -nf * Hx_f[li].y), ph);
         float2 Mx = cmul((float2)(-nf * Ey_f[li].x, -nf * Ey_f[li].y), ph);
         float2 My = cmul((float2)( nf * Ex_f[li].x,  nf * Ex_f[li].y), ph);
-        caccum(Nx, (float2)(Jx.x * dA, Jx.y * dA));
-        caccum(Ny, (float2)(Jy.x * dA, Jy.y * dA));
-        caccum(Lx, (float2)(Mx.x * dA, Mx.y * dA));
-        caccum(Ly, (float2)(My.x * dA, My.y * dA));
+        caccum(Nx, (float2)(Jx.x * dAw, Jx.y * dAw));
+        caccum(Ny, (float2)(Jy.x * dAw, Jy.y * dAw));
+        caccum(Lx, (float2)(Mx.x * dAw, Mx.y * dAw));
+        caccum(Ly, (float2)(My.x * dAw, My.y * dAw));
     }
 }
 

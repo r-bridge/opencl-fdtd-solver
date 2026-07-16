@@ -28,11 +28,19 @@ FREQ = 5e9
 FWIDTH = 0.2 * FREQ
 N_STEPS = 500
 MONITOR_CTR = (30e-3, 30e-3, 30e-3)
-MONITOR_SIZE = (20e-3, 20e-3, 20e-3)
+# Huygens box half-extent 10 mm (Meep Near2Far faces at ±10 mm). Must exceed the
+# dielectric sphere radius so the N2F surface sits in vacuum around the scatterer.
+N2F_HALF_M = 10e-3
+MONITOR_SIZE = (2.0 * N2F_HALF_M, 2.0 * N2F_HALF_M, 2.0 * N2F_HALF_M)
+# Sphere radius 4 cells × 2 mm = 8 mm < 10 mm N2F half (2 mm vacuum margin).
+SPHERE_RAD_CELLS = 4
+SPHERE_RADIUS_MM = SPHERE_RAD_CELLS * (DL * 1e3)
 # SI |S| at 1000 m underflows float32 noise on this tiny grid; angular shape is
 # distance-independent in the far-field limit, so compare at 10 m for OpenCL.
 OBS_R_OPENCL = 10.0  # metres
 OBS_R_MEEP_MM = 1e6  # 1000 m in Meep mm units (historical / well in far field)
+
+assert SPHERE_RADIUS_MM * 1e-3 < N2F_HALF_M, "N2F box must enclose the sphere with margin"
 
 
 def _z_src() -> int:
@@ -75,13 +83,15 @@ def _make_solver(eps: np.ndarray | None = None, *, compact_source: bool = False)
     return fdtd
 
 
-def _sphere_eps(eps_r: float = 4.0, rad_cells: int = 6) -> np.ndarray:
+def _sphere_eps(eps_r: float = 4.0, rad_cells: int = SPHERE_RAD_CELLS) -> np.ndarray:
+    """Staircased εᵣ sphere (cell centers). OpenCL then Yee-edge-averages via set_epsilon."""
     eps = np.ones(SHAPE, dtype=np.float32)
     ctr = SHAPE[0] // 2
+    r2 = int(rad_cells) ** 2
     for i in range(SHAPE[0]):
         for j in range(SHAPE[1]):
             for k in range(SHAPE[2]):
-                if (i - ctr) ** 2 + (j - ctr) ** 2 + (k - ctr) ** 2 < rad_cells**2:
+                if (i - ctr) ** 2 + (j - ctr) ** 2 + (k - ctr) ** 2 < r2:
                     eps[i, j, k] = eps_r
     return eps
 
@@ -90,14 +100,16 @@ def _meep_common_preamble(
     eps_sphere: float | None = None,
     *,
     compact_source: bool = True,
+    sphere_radius_mm: float | None = None,
 ) -> str:
     """Meep script fragment: geometry, source, optional dielectric sphere."""
     until = meep_until(N_STEPS, DL)
     sphere_block = ""
     if eps_sphere is not None:
+        rad_mm = float(SPHERE_RADIUS_MM if sphere_radius_mm is None else sphere_radius_mm)
         sphere_block = f"""
 geometry = [
-    mp.Sphere(radius=12.0, center=mp.Vector3(), material=mp.Medium(epsilon={eps_sphere}))
+    mp.Sphere(radius={rad_mm}, center=mp.Vector3(), material=mp.Medium(epsilon={eps_sphere}))
 ]
 """
     else:
@@ -128,6 +140,8 @@ sources = [
 ]
 """
 
+    # eps_averaging=True: Meep subpixel material average at Yee locations — counterpart
+    # to OpenCL's Yee-edge ε sampling from the staircased sphere array.
     return f"""
 import meep as mp
 import numpy as np
@@ -154,7 +168,7 @@ sim = mp.Simulation(
     boundary_layers=boundary_layers,
     sources=sources,
     geometry=geometry,
-    eps_averaging=False,
+    eps_averaging=True,
 )
 
 f_meep = 1.0 / 60.0  # 5 GHz with a=1 mm
@@ -252,11 +266,19 @@ def run_opencl_farfield_pattern(
 
 
 def run_meep_farfield_pattern(
-    n_angles: int = 19, eps_sphere: float | None = None
+    n_angles: int = 19,
+    eps_sphere: float | None = None,
+    *,
+    sphere_radius_mm: float | None = None,
 ) -> dict[str, Any]:
     script = (
-        _meep_common_preamble(eps_sphere, compact_source=True)
+        _meep_common_preamble(
+            eps_sphere,
+            compact_source=True,
+            sphere_radius_mm=sphere_radius_mm,
+        )
         + f"""
+# N2F half-extent = 10 mm (matches OpenCL MONITOR_SIZE); sphere radius must be smaller.
 R = 5.0
 n2f_regions = [
     mp.Near2FarRegion(center=mp.Vector3(x=-2*R), size=mp.Vector3(0, 4*R, 4*R), weight=+1),

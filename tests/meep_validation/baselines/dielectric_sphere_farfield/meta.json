@@ -1,9 +1,9 @@
 {
   "courant": 0.5715767664977295,
   "discrepancy": {
-    "main_lobe_max_abs_db_error": 2.8404971,
-    "meep_null_ratio": 6.2177041e-06,
-    "opencl_null_ratio": 0.035692917
+    "main_lobe_max_abs_db_error": 0.62530857,
+    "meep_null_ratio": 1.8161653e-05,
+    "opencl_null_ratio": 0.02438465
   },
   "dl_m": 0.002,
   "files": [
@@ -23,5 +23,5 @@
   ],
   "source": "soft_Ex_compact_patch",
   "sphere_eps": 4.0,
-  "sphere_rad_cells": 6
+  "sphere_rad_cells": 4
 }

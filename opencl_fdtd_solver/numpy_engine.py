@@ -16,9 +16,12 @@
 # You should have received a copy of the GNU General Public License
 # along with opencl-fdtd-solver.  If not, see <http://www.gnu.org/licenses/>.
 
+import warnings
+
 import numpy as np
 
 from .constants import C0, EPS0, ETA0, MU0
+from .materials import yee_edge_ce
 from .plugin import SourceMonitorMixin
 
 
@@ -50,6 +53,9 @@ class NumPyFDTD(SourceMonitorMixin):
         self.Hy = np.zeros(shape, dtype=dtype)
         self.Hz = np.zeros(shape, dtype=dtype)
         self.eps_r = np.ones(shape, dtype=dtype)
+        self._ce_x = np.full(shape, self.dt / EPS0, dtype=dtype)
+        self._ce_y = np.full(shape, self.dt / EPS0, dtype=dtype)
+        self._ce_z = np.full(shape, self.dt / EPS0, dtype=dtype)
 
         self._sources = []
         self._monitors = []
@@ -63,6 +69,7 @@ class NumPyFDTD(SourceMonitorMixin):
                 f"Epsilon shape mismatch: expected {expected}, got {tuple(eps_array.shape)}"
             )
         self.eps_r = eps_array.astype(self.dtype)
+        self._ce_x, self._ce_y, self._ce_z = yee_edge_ce(self.eps_r, self.dt, dtype=self.dtype)
 
     def add_source_Ex(self, z_src, amp, i0=None, i1=None, j0=None, j1=None):
         """Soft-add a sheet amplitude directly onto ``Ex`` (legacy field inject).
@@ -73,6 +80,11 @@ class NumPyFDTD(SourceMonitorMixin):
         sheet (default: full XY, including PML). Use interior-only bounds when
         matching Meep sources that stop at the PML.
         """
+        warnings.warn(
+            "add_source_Ex is a legacy Ex soft-add; prefer add_source_Jx for SI current density",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         i0_i = 0 if i0 is None else int(i0)
         i1_i = self.Nx if i1 is None else int(i1)
         j0_i = 0 if j0 is None else int(j0)
@@ -124,7 +136,7 @@ class NumPyFDTD(SourceMonitorMixin):
 
         sl_i = slice(i0_i, i1_i)
         sl_j = slice(j0_i, j1_i)
-        soft = -(self.dt / (EPS0 * self.eps_r[sl_i, sl_j, z])) * jx
+        soft = -self._ce_x[sl_i, sl_j, z] * jx
         if rim_taper:
             nx_s = max(0, i1_i - i0_i)
             ny_s = max(0, j1_i - j0_i)
@@ -271,20 +283,19 @@ class NumPyFDTD(SourceMonitorMixin):
         self._psi_Ez_x = self._bx * self._psi_Ez_x + self._cx * dHy_dx
         self._psi_Ez_y = self._by * self._psi_Ez_y + self._cy * dHx_dy
 
-        coeff = self.dt / (EPS0 * self.eps_r)
-        self.Ex += coeff * (
+        self.Ex += self._ce_x * (
             dHz_dy / (self._ky * self.dl)
             + self._psi_Ex_y
             - dHy_dz / (self._kz * self.dl)
             - self._psi_Ex_z
         )
-        self.Ey += coeff * (
+        self.Ey += self._ce_y * (
             dHx_dz / (self._kz * self.dl)
             + self._psi_Ey_z
             - dHz_dx / (self._kx * self.dl)
             - self._psi_Ey_x
         )
-        self.Ez += coeff * (
+        self.Ez += self._ce_z * (
             dHy_dx / (self._kx * self.dl)
             + self._psi_Ez_x
             - dHx_dy / (self._ky * self.dl)
@@ -293,8 +304,12 @@ class NumPyFDTD(SourceMonitorMixin):
 
     def step(self):
         self._update_H()
+        # Soft currents belong at (n+1/2)Δt in the leapfrog E update.
+        t_int = self.t
+        self.t = t_int + 0.5 * self.dt
         for src in self._sources:
             src(self)
+        self.t = t_int
         self._update_E()
         self.t += self.dt
         self.step_num += 1

@@ -70,7 +70,7 @@ class TestMemoryEstimate(unittest.TestCase):
     def test_fields_only_when_npml_zero(self):
         shape = (40, 50, 60)
         item = 4
-        expected = 7 * 40 * 50 * 60 * item
+        expected = 9 * 40 * 50 * 60 * item
         self.assertEqual(
             OpenCLFDTD.estimate_device_memory_bytes(shape, npml=0),
             expected,
@@ -79,7 +79,7 @@ class TestMemoryEstimate(unittest.TestCase):
     def test_includes_face_local_psi(self):
         shape = (100, 100, 100)
         npml = 10
-        fields = 7 * 100**3 * 4
+        fields = 9 * 100**3 * 4
         psi = (
             4 * (2 * npml * 100 * 100) + 4 * (100 * 2 * npml * 100) + 4 * (100 * 100 * 2 * npml)
         ) * 4
@@ -120,20 +120,21 @@ class TestOpenCLEngineBasics(unittest.TestCase):
 
     def test_set_epsilon_roundtrip(self):
         from opencl_fdtd_solver.constants import EPS0
+        from opencl_fdtd_solver.materials import yee_edge_ce
 
         fdtd = OpenCLFDTD((12, 12, 12), 1e-3, npml=2)
         eps = np.ones((12, 12, 12), dtype=np.float32)
         eps[6, 6, 6] = 4.0
         fdtd.set_epsilon(eps)
         host = np.empty(12 * 12 * 12, dtype=np.float32)
-        cl.enqueue_copy(fdtd.queue, host, fdtd.ce_buf)
+        cl.enqueue_copy(fdtd.queue, host, fdtd.ce_x_buf)
         fdtd.queue.finish()
-        # Device stores the E-update coefficient dt/(eps0*eps_r).
-        ce = host.reshape(12, 12, 12)
-        expected_eps4 = fdtd.dt / (EPS0 * 4.0)
-        expected_vac = fdtd.dt / EPS0
-        self.assertAlmostEqual(float(ce[6, 6, 6]) / expected_eps4, 1.0, places=6)
-        self.assertAlmostEqual(float(ce[0, 0, 0]) / expected_vac, 1.0, places=6)
+        ce_x = host.reshape(12, 12, 12)
+        expect_x, _, _ = yee_edge_ce(eps, fdtd.dt, dtype=np.float32)
+        # Ex-edge at (6,6,6) averages cells 6 and 7 → ε=2.5.
+        self.assertAlmostEqual(float(ce_x[6, 6, 6]), float(expect_x[6, 6, 6]), places=6)
+        self.assertAlmostEqual(float(ce_x[0, 0, 0]), float(fdtd.dt / EPS0), places=6)
+        self.assertAlmostEqual(float(expect_x[6, 6, 6]), float(fdtd.dt / (EPS0 * 2.5)), places=6)
 
     def test_set_epsilon_shape_mismatch(self):
         fdtd = OpenCLFDTD((10, 10, 10), 1e-3, npml=2)
@@ -171,9 +172,9 @@ class TestOpenCLEngineBasics(unittest.TestCase):
         fdtd.step()
         fdtd.queue.finish()
         ex = fdtd.Ex
-        soft_eps4 = -float(fdtd.dt) / (float(EPS0) * 4.0) * Jx
+        soft_edge = -float(fdtd.dt) / (float(EPS0) * 2.5) * Jx
         soft_vac = -float(fdtd.dt) / float(EPS0) * Jx
-        self.assertAlmostEqual(float(ex[8, 8, z]), soft_eps4, places=6)
+        self.assertAlmostEqual(float(ex[8, 8, z]), soft_edge, places=6)
         self.assertAlmostEqual(float(ex[p, p, z]), soft_vac, places=6)
         self.assertEqual(float(ex[0, 0, z]), 0.0)  # outside sheet (in PML)
 
@@ -310,9 +311,9 @@ class TestNumPyEngine(unittest.TestCase):
         )
         fdtd.step()
         ex = fdtd.Ex
-        soft_eps4 = -float(fdtd.dt) / (float(EPS0) * 4.0) * Jx
+        soft_edge = -float(fdtd.dt) / (float(EPS0) * 2.5) * Jx
         soft_vac = -float(fdtd.dt) / float(EPS0) * Jx
-        self.assertAlmostEqual(float(ex[8, 8, z]), soft_eps4, places=6)
+        self.assertAlmostEqual(float(ex[8, 8, z]), soft_edge, places=6)
         self.assertAlmostEqual(float(ex[p, p, z]), soft_vac, places=6)
         self.assertEqual(float(ex[0, 0, z]), 0.0)  # outside sheet (in PML)
 
@@ -456,6 +457,85 @@ class TestDeviceSelectionFallbacks(unittest.TestCase):
         self.assertIs(fdtd.device, gpu)
         self.assertIs(fdtd.ctx, fake_ctx)
         self.assertIs(fdtd.queue, fake_queue)
+
+    def _reset_default_runtime(self):
+        import opencl_fdtd_solver.engine as eng
+
+        eng._DEFAULT_CTX = None
+        eng._DEFAULT_QUEUE = None
+        eng._DEFAULT_DEVICE = None
+
+    def _fake_platform(self, devices):
+        plat = mock.Mock()
+        plat.get_devices.return_value = devices
+        return plat
+
+    def test_ignore_gpu_prefers_cpu(self):
+        """IGNORE_GPU skips vendor matches so POCL/CPU is chosen in CI."""
+        from opencl_fdtd_solver.engine import _default_opencl_runtime
+
+        gpu = mock.Mock()
+        gpu.name = "NVIDIA GeForce"
+        gpu.vendor = "NVIDIA"
+        gpu.type = cl.device_type.GPU
+        cpu = mock.Mock()
+        cpu.name = "pthread-haswell"
+        cpu.vendor = "GenuineIntel"
+        cpu.type = cl.device_type.CPU
+        plat = self._fake_platform([gpu, cpu])
+        fake_ctx = mock.Mock()
+        fake_queue = mock.Mock()
+
+        self._reset_default_runtime()
+        with (
+            mock.patch.dict(os.environ, {"IGNORE_GPU": "NVIDIA,AMD"}),
+            mock.patch("opencl_fdtd_solver.engine.cl.get_platforms", return_value=[plat]),
+            mock.patch("opencl_fdtd_solver.engine.cl.Context", return_value=fake_ctx) as ctx_ctor,
+            mock.patch("opencl_fdtd_solver.engine.cl.CommandQueue", return_value=fake_queue),
+        ):
+            ctx, queue, device = _default_opencl_runtime()
+
+        self.assertIs(device, cpu)
+        self.assertIs(ctx, fake_ctx)
+        self.assertIs(queue, fake_queue)
+        ctx_ctor.assert_called_once_with([cpu])
+        self._reset_default_runtime()
+
+    def test_ignore_gpu_falls_back_when_all_filtered(self):
+        """If IGNORE_GPU removes every device, fall back to the unfiltered list."""
+        from opencl_fdtd_solver.engine import _default_opencl_runtime
+
+        gpu = mock.Mock()
+        gpu.name = "AMD Radeon"
+        gpu.vendor = "AMD"
+        gpu.type = cl.device_type.GPU
+        plat = self._fake_platform([gpu])
+        fake_ctx = mock.Mock()
+        fake_queue = mock.Mock()
+
+        self._reset_default_runtime()
+        with (
+            mock.patch.dict(os.environ, {"IGNORE_GPU": "AMD"}),
+            mock.patch("opencl_fdtd_solver.engine.cl.get_platforms", return_value=[plat]),
+            mock.patch("opencl_fdtd_solver.engine.cl.Context", return_value=fake_ctx),
+            mock.patch("opencl_fdtd_solver.engine.cl.CommandQueue", return_value=fake_queue),
+        ):
+            _, _, device = _default_opencl_runtime()
+
+        self.assertIs(device, gpu)
+        self._reset_default_runtime()
+
+    def test_no_platforms_raises(self):
+        from opencl_fdtd_solver.engine import _default_opencl_runtime
+
+        self._reset_default_runtime()
+        with (
+            mock.patch.dict(os.environ, {"IGNORE_GPU": ""}, clear=False),
+            mock.patch("opencl_fdtd_solver.engine.cl.get_platforms", return_value=[]),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "No OpenCL platforms"):
+                _default_opencl_runtime()
+        self._reset_default_runtime()
 
 
 if __name__ == "__main__":

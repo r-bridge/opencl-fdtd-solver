@@ -70,7 +70,7 @@ def _rebuilt_doc_from_baselines():
                 images=list(meta["files"]),
             )
         )
-    return build_farfield_discrepancy_document(case_docs)
+    return json.loads(json.dumps(build_farfield_discrepancy_document(case_docs), sort_keys=True))
 
 
 class TestMeepFarfieldBaselines(unittest.TestCase):

@@ -159,7 +159,7 @@ class TestMeepPlaneBaselines(unittest.TestCase):
                     images=[f"step_{s:04d}.png" for s in case.checkpoints],
                 )
             )
-        rebuilt = build_discrepancy_document(case_docs)
+        rebuilt = json.loads(json.dumps(build_discrepancy_document(case_docs), sort_keys=True))
         expected = json.loads((root / "discrepancy_report.json").read_text(encoding="utf-8"))
         self.assertEqual(
             rebuilt,
