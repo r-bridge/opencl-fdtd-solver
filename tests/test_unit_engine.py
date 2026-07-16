@@ -194,10 +194,108 @@ class TestNumPyEngine(unittest.TestCase):
         cl_sim = OpenCLFDTD(shape, dl, npml=npml)
         z = shape[2] - npml - 2
 
-        np_sim._sources.append(lambda f: f.Ex.__setitem__((slice(None), slice(None), z), f.Ex[:, :, z] + np.sin(2 * np.pi * freq * f.t)))
+        np_sim._sources.append(lambda f: f.add_source_Ex(z, np.sin(2 * np.pi * freq * f.t)))
         cl_sim._sources.append(lambda f: f.add_source_Ex(z, np.sin(2 * np.pi * freq * f.t)))
         np_sim.run(20)
         cl_sim.run(20)
+        for field in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
+            diff = np.max(np.abs(getattr(np_sim, field) - getattr(cl_sim, field)))
+            self.assertLess(diff, 2e-4, field)
+
+    def test_add_source_jx_matches_soft_delta_e(self):
+        """NumPy Jx inject equals Ex soft-add of -dt/(ε₀ εᵣ) J on the sheet."""
+        from opencl_fdtd_solver.numpy_engine import EPS0
+
+        shape = (16, 16, 16)
+        dl = 1e-3
+        npml = 2
+        z = 8
+        Jx = 0.25
+        p = npml
+        fdtd = NumPyFDTD(shape, dl, npml=npml)
+        eps = np.ones(shape, dtype=np.float32)
+        eps[8, 8, z] = 4.0
+        fdtd.set_epsilon(eps)
+        fdtd._sources.append(
+            lambda f: f.add_source_Jx(z, Jx, i0=p, i1=shape[0] - p, j0=p, j1=shape[1] - p)
+        )
+        fdtd.step()
+        ex = fdtd.Ex
+        soft_eps4 = -float(fdtd.dt) / (float(EPS0) * 4.0) * Jx
+        soft_vac = -float(fdtd.dt) / float(EPS0) * Jx
+        self.assertAlmostEqual(float(ex[8, 8, z]), soft_eps4, places=6)
+        self.assertAlmostEqual(float(ex[p, p, z]), soft_vac, places=6)
+        self.assertEqual(float(ex[0, 0, z]), 0.0)  # outside sheet (in PML)
+
+    def test_add_source_jx_rim_taper_weights(self):
+        """NumPy rim taper: interior=1, edge=rim_edge, corner=rim_edge² (no renorm)."""
+        from opencl_fdtd_solver.numpy_engine import EPS0
+
+        shape = (16, 16, 16)
+        npml = 2
+        z = 8
+        Jx = 1.0
+        ew = 0.5
+        p = npml
+        i1 = shape[0] - p
+        j1 = shape[1] - p
+        fdtd = NumPyFDTD(shape, 1e-3, npml=npml)
+        fdtd._sources.append(
+            lambda f: f.add_source_Jx(
+                z,
+                Jx,
+                i0=p,
+                i1=i1,
+                j0=p,
+                j1=j1,
+                rim_taper=True,
+                rim_edge=ew,
+                rim_renorm=False,
+            )
+        )
+        fdtd.step()
+        ex = fdtd.Ex
+        base = -float(fdtd.dt) / float(EPS0) * Jx
+        self.assertAlmostEqual(float(ex[p + 2, p + 2, z]), base, places=6)  # interior
+        self.assertAlmostEqual(float(ex[p, p + 2, z]), ew * base, places=6)  # x-edge
+        self.assertAlmostEqual(float(ex[p + 2, p, z]), ew * base, places=6)  # y-edge
+        self.assertAlmostEqual(float(ex[p, p, z]), ew * ew * base, places=6)  # corner
+        self.assertAlmostEqual(float(ex[i1 - 1, j1 - 1, z]), ew * ew * base, places=6)
+
+    def test_add_source_jx_matches_opencl(self):
+        """NumPy and OpenCL add_source_Jx (with rim taper + renorm) stay in lockstep."""
+        os.environ.setdefault("PYOPENCL_CTX", "0")
+        shape = (20, 20, 20)
+        dl = 1e-3
+        npml = 3
+        z = 10
+        p = npml
+        Jx = 0.4
+        eps = np.ones(shape, dtype=np.float32)
+        eps[8:12, 8:12, z] = 2.5
+
+        np_sim = NumPyFDTD(shape, dl, npml=npml)
+        cl_sim = OpenCLFDTD(shape, dl, npml=npml)
+        np_sim.set_epsilon(eps)
+        cl_sim.set_epsilon(eps)
+
+        def src(f):
+            f.add_source_Jx(
+                z,
+                Jx,
+                i0=p,
+                i1=shape[0] - p,
+                j0=p,
+                j1=shape[1] - p,
+                rim_taper=True,
+                rim_edge=0.8,
+                rim_renorm=True,
+            )
+
+        np_sim._sources.append(src)
+        cl_sim._sources.append(src)
+        np_sim.run(15)
+        cl_sim.run(15)
         for field in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
             diff = np.max(np.abs(getattr(np_sim, field) - getattr(cl_sim, field)))
             self.assertLess(diff, 2e-4, field)
