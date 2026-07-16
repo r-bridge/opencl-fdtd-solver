@@ -11,7 +11,7 @@
 __kernel void update_H_interior(
     int Nx, int Ny, int Nz,
     int npml,
-    float dl, float dtm,
+    float dtm_dl,  /* dt / (mu0 * dl), folded on host */
     __global const float * restrict Ex,
     __global const float * restrict Ey,
     __global const float * restrict Ez,
@@ -26,7 +26,6 @@ __kernel void update_H_interior(
     if (i >= Nx - npml || j >= Ny - npml || k >= Nz - npml) return;
 
     int idx = i * Ny * Nz + j * Nz + k;
-    float inv_dl = 1.0f / dl;
 
     float dEz_dy = Ez[idx + Nz] - Ez[idx];
     float dEy_dz = Ey[idx + 1] - Ey[idx];
@@ -35,24 +34,25 @@ __kernel void update_H_interior(
     float dEy_dx = Ey[idx + Ny * Nz] - Ey[idx];
     float dEx_dy = Ex[idx + Nz] - Ex[idx];
 
-    Hx[idx] -= dtm * (dEz_dy - dEy_dz) * inv_dl;
-    Hy[idx] -= dtm * (dEx_dz - dEz_dx) * inv_dl;
-    Hz[idx] -= dtm * (dEy_dx - dEx_dy) * inv_dl;
+    Hx[idx] -= dtm_dl * (dEz_dy - dEy_dz);
+    Hy[idx] -= dtm_dl * (dEx_dz - dEz_dx);
+    Hz[idx] -= dtm_dl * (dEy_dx - dEx_dy);
 }
 
 __kernel void update_H_pml(
     int Nx, int Ny, int Nz,
     int npml,
-    float dl, float dtm,
+    float dtm,
     __global const float * restrict Ex,
     __global const float * restrict Ey,
     __global const float * restrict Ez,
     __global float * restrict Hx,
     __global float * restrict Hy,
     __global float * restrict Hz,
-    __global const float * restrict bx, __global const float * restrict cx, __global const float * restrict kx,
-    __global const float * restrict by, __global const float * restrict cy, __global const float * restrict ky,
-    __global const float * restrict bz, __global const float * restrict cz, __global const float * restrict kz,
+    /* ikx/iky/ikz hold 1/(kappa * dl), precomputed on host */
+    __global const float * restrict bx, __global const float * restrict cx, __global const float * restrict ikx,
+    __global const float * restrict by, __global const float * restrict cy, __global const float * restrict iky,
+    __global const float * restrict bz, __global const float * restrict cz, __global const float * restrict ikz,
     __global float * restrict psi_Hx_y, __global float * restrict psi_Hx_z,
     __global float * restrict psi_Hy_x, __global float * restrict psi_Hy_z,
     __global float * restrict psi_Hz_x, __global float * restrict psi_Hz_y
@@ -112,17 +112,16 @@ __kernel void update_H_pml(
         psi_Hy_z[zi] = p_Hy_z;
     }
 
-    Hx[idx] -= dtm * (dEz_dy / (ky[j] * dl) + p_Hx_y - dEy_dz / (kz[k] * dl) - p_Hx_z);
-    Hy[idx] -= dtm * (dEx_dz / (kz[k] * dl) + p_Hy_z - dEz_dx / (kx[i] * dl) - p_Hy_x);
-    Hz[idx] -= dtm * (dEy_dx / (kx[i] * dl) + p_Hz_x - dEx_dy / (ky[j] * dl) - p_Hz_y);
+    Hx[idx] -= dtm * (dEz_dy * iky[j] + p_Hx_y - dEy_dz * ikz[k] - p_Hx_z);
+    Hy[idx] -= dtm * (dEx_dz * ikz[k] + p_Hy_z - dEz_dx * ikx[i] - p_Hy_x);
+    Hz[idx] -= dtm * (dEy_dx * ikx[i] + p_Hz_x - dEx_dy * iky[j] - p_Hz_y);
 }
 
 __kernel void update_E_interior(
     int Nx, int Ny, int Nz,
     int npml,
-    float dl, float dt,
-    float eps0,
-    __global const float * restrict eps_r,
+    float inv_dl,
+    __global const float * restrict ce,  /* dt / (eps0 * eps_r), precomputed */
     __global const float * restrict Hx,
     __global const float * restrict Hy,
     __global const float * restrict Hz,
@@ -137,7 +136,6 @@ __kernel void update_E_interior(
     if (i >= Nx - npml || j >= Ny - npml || k >= Nz - npml) return;
 
     int idx = i * Ny * Nz + j * Nz + k;
-    float inv_dl = 1.0f / dl;
 
     float dHz_dy = Hz[idx] - Hz[idx - Nz];
     float dHy_dz = Hy[idx] - Hy[idx - 1];
@@ -146,7 +144,7 @@ __kernel void update_E_interior(
     float dHy_dx = Hy[idx] - Hy[idx - Ny * Nz];
     float dHx_dy = Hx[idx] - Hx[idx - Nz];
 
-    float coeff = dt / (eps0 * eps_r[idx]) * inv_dl;
+    float coeff = ce[idx] * inv_dl;
     Ex[idx] += coeff * (dHz_dy - dHy_dz);
     Ey[idx] += coeff * (dHx_dz - dHz_dx);
     Ez[idx] += coeff * (dHy_dx - dHx_dy);
@@ -155,18 +153,17 @@ __kernel void update_E_interior(
 __kernel void update_E_pml(
     int Nx, int Ny, int Nz,
     int npml,
-    float dl, float dt,
-    float eps0,
-    __global const float * restrict eps_r,
+    __global const float * restrict ce,  /* dt / (eps0 * eps_r), precomputed */
     __global const float * restrict Hx,
     __global const float * restrict Hy,
     __global const float * restrict Hz,
     __global float * restrict Ex,
     __global float * restrict Ey,
     __global float * restrict Ez,
-    __global const float * restrict bx, __global const float * restrict cx, __global const float * restrict kx,
-    __global const float * restrict by, __global const float * restrict cy, __global const float * restrict ky,
-    __global const float * restrict bz, __global const float * restrict cz, __global const float * restrict kz,
+    /* ikx/iky/ikz hold 1/(kappa * dl), precomputed on host */
+    __global const float * restrict bx, __global const float * restrict cx, __global const float * restrict ikx,
+    __global const float * restrict by, __global const float * restrict cy, __global const float * restrict iky,
+    __global const float * restrict bz, __global const float * restrict cz, __global const float * restrict ikz,
     __global float * restrict psi_Ex_y, __global float * restrict psi_Ex_z,
     __global float * restrict psi_Ey_x, __global float * restrict psi_Ey_z,
     __global float * restrict psi_Ez_x, __global float * restrict psi_Ez_y
@@ -226,8 +223,8 @@ __kernel void update_E_pml(
         psi_Ey_z[zi] = p_Ey_z;
     }
 
-    float coeff = dt / (eps0 * eps_r[idx]);
-    Ex[idx] += coeff * (dHz_dy / (ky[j] * dl) + p_Ex_y - dHy_dz / (kz[k] * dl) - p_Ex_z);
-    Ey[idx] += coeff * (dHx_dz / (kz[k] * dl) + p_Ey_z - dHz_dx / (kx[i] * dl) - p_Ey_x);
-    Ez[idx] += coeff * (dHy_dx / (kx[i] * dl) + p_Ez_x - dHx_dy / (ky[j] * dl) - p_Ez_y);
+    float coeff = ce[idx];
+    Ex[idx] += coeff * (dHz_dy * iky[j] + p_Ex_y - dHy_dz * ikz[k] - p_Ex_z);
+    Ey[idx] += coeff * (dHx_dz * ikz[k] + p_Ey_z - dHz_dx * ikx[i] - p_Ey_x);
+    Ez[idx] += coeff * (dHy_dx * ikx[i] + p_Ez_x - dHx_dy * iky[j] - p_Ez_y);
 }
