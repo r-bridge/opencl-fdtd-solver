@@ -17,6 +17,7 @@
 # along with opencl-fdtd-solver.  If not, see <http://www.gnu.org/licenses/>.
 
 import logging
+import os
 import warnings
 
 import numpy as np
@@ -44,14 +45,33 @@ def _default_opencl_runtime():
     platforms = cl.get_platforms()
     if not platforms:
         raise RuntimeError("No OpenCL platforms found.")
-    devices = []
+
+    # CI / baseline regen set IGNORE_GPU=NVIDIA,AMD so POCL CPU is preferred.
+    ignore_tokens = [
+        t.strip().upper() for t in os.environ.get("IGNORE_GPU", "").split(",") if t.strip()
+    ]
+
+    def _ignored(dev) -> bool:
+        if not ignore_tokens:
+            return False
+        blob = f"{dev.name} {dev.vendor}".upper()
+        return any(tok in blob for tok in ignore_tokens)
+
+    gpus = []
+    cpus = []
     for p in platforms:
-        devices.extend(p.get_devices(cl.device_type.GPU))
+        for d in p.get_devices():
+            if _ignored(d):
+                continue
+            if d.type & cl.device_type.GPU:
+                gpus.append(d)
+            elif d.type & cl.device_type.CPU:
+                cpus.append(d)
+    devices = gpus or cpus
     if not devices:
+        # Fall back to any device if IGNORE_GPU filtered everything (local GPU-only hosts).
         for p in platforms:
-            devices.extend(p.get_devices(cl.device_type.CPU))
-    if not devices:
-        devices = platforms[0].get_devices()
+            devices.extend(p.get_devices())
     if not devices:
         raise RuntimeError("No OpenCL devices found.")
 
