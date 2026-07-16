@@ -115,8 +115,9 @@ class TestOpenCLEngineBasics(unittest.TestCase):
 
     def test_set_epsilon_shape_mismatch(self):
         fdtd = OpenCLFDTD((10, 10, 10), 1e-3, npml=2)
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(ValueError) as cm:
             fdtd.set_epsilon(np.ones((8, 8, 8), dtype=np.float32))
+        self.assertIn("Epsilon shape mismatch", str(cm.exception))
 
     def test_npml_zero_runs(self):
         fdtd = OpenCLFDTD((20, 20, 20), 1e-3, npml=0)
@@ -231,6 +232,12 @@ class TestNumPyEngine(unittest.TestCase):
         for field in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
             diff = np.max(np.abs(getattr(np_sim, field) - getattr(cl_sim, field)))
             self.assertLess(diff, 2e-4, field)
+
+    def test_set_epsilon_shape_mismatch(self):
+        sim = NumPyFDTD((10, 10, 10), 1e-3, npml=2)
+        with self.assertRaises(ValueError) as cm:
+            sim.set_epsilon(np.ones((8, 8, 8), dtype=np.float32))
+        self.assertIn("Epsilon shape mismatch", str(cm.exception))
 
     def test_add_source_jx_matches_soft_delta_e(self):
         """NumPy Jx inject equals Ex soft-add of -dt/(ε₀ εᵣ) J on the sheet."""

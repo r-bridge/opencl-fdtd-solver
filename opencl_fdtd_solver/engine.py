@@ -140,7 +140,11 @@ class OpenCLFDTD(SourceMonitorMixin):
 
     def set_epsilon(self, eps_array):
         """Set the 3D permittivity array on the GPU."""
-        assert eps_array.shape == (self.Nx, self.Ny, self.Nz), "Epsilon shape mismatch"
+        expected = (self.Nx, self.Ny, self.Nz)
+        if eps_array.shape != expected:
+            raise ValueError(
+                f"Epsilon shape mismatch: expected {expected}, got {tuple(eps_array.shape)}"
+            )
         eps_flat = eps_array.astype(self.dtype).flatten()
         cl.enqueue_copy(self.queue, self.eps_buf, eps_flat)
 

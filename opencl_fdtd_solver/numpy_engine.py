@@ -54,7 +54,11 @@ class NumPyFDTD(SourceMonitorMixin):
         self._build_cpml()
 
     def set_epsilon(self, eps_array):
-        assert eps_array.shape == (self.Nx, self.Ny, self.Nz)
+        expected = (self.Nx, self.Ny, self.Nz)
+        if eps_array.shape != expected:
+            raise ValueError(
+                f"Epsilon shape mismatch: expected {expected}, got {tuple(eps_array.shape)}"
+            )
         self.eps_r = eps_array.astype(self.dtype)
 
     def add_source_Ex(self, z_src, amp, i0=None, i1=None, j0=None, j1=None):
