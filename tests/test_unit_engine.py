@@ -213,6 +213,36 @@ class TestOpenCLEngineBasics(unittest.TestCase):
             self.assertEqual(arr.shape, shape)
             self.assertEqual(arr.dtype, np.float32)
 
+    def test_read_point_matches_field_slice(self):
+        fdtd = OpenCLFDTD((12, 12, 12), 1e-3, npml=2)
+        z = 5
+        amp = 0.37
+        fdtd.add_source(lambda f: f.add_source_Ex(z, amp))
+        fdtd.step()
+        i, j, k = 6, 7, z
+        self.assertAlmostEqual(fdtd.read_point("Ex", i, j, k), float(fdtd.Ex[i, j, k]))
+
+    def test_init_rejects_non_float32_dtype(self):
+        gpu = mock.Mock()
+        gpu.name = "FakeGPU"
+        gpu.type = cl.device_type.GPU
+        gpu.global_mem_size = 8 * 1024**3
+
+        fake_ctx = mock.Mock()
+        fake_ctx.devices = [gpu]
+        fake_queue = mock.Mock()
+
+        with self.assertRaises(ValueError) as cm:
+            OpenCLFDTD(
+                (8, 8, 8),
+                1e-3,
+                npml=1,
+                dtype=np.float64,
+                ctx=fake_ctx,
+                queue=fake_queue,
+            )
+        self.assertIn("float32", str(cm.exception).lower())
+
 
 class TestNumPyEngine(unittest.TestCase):
     def test_matches_opencl_vacuum_no_dielectric(self):

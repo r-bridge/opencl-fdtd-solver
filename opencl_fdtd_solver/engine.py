@@ -76,13 +76,16 @@ class OpenCLFDTD(SourceMonitorMixin):
         shape : (Nx, Ny, Nz) Yee cells
         dl    : uniform cell size in metres
         npml  : PML thickness in cells
-        dtype : data type for computation (np.float32)
+        dtype : data type for computation (``np.float32`` only; OpenCL kernels are float32)
         ctx   : pre-existing OpenCL context (optional)
         queue : pre-existing OpenCL command queue (optional)
         """
         self.Nx, self.Ny, self.Nz = shape
         self.dl = float(dl)
         self.npml = int(npml)
+        dtype = np.dtype(dtype)
+        if dtype != np.float32:
+            raise ValueError(f"OpenCLFDTD only supports float32 computation; got {dtype!r}")
         self.dtype = dtype
         self.t = 0.0
         self.step_num = 0
@@ -604,11 +607,16 @@ class OpenCLFDTD(SourceMonitorMixin):
         return host_arr
 
     def read_point(self, field_name, i, j, k):
-        """Read a single point value from a field buffer on the GPU (efficient 4-byte copy)."""
+        """Read a single point value from a field buffer on the GPU."""
         buf = getattr(self, f"{field_name}_buf")
         idx = int(i * self.Ny * self.Nz + j * self.Nz + k)
         dest = np.empty(1, dtype=self.dtype)
-        cl.enqueue_copy(self.queue, dest, buf, src_offset=idx * 4)
+        cl.enqueue_copy(
+            self.queue,
+            dest,
+            buf,
+            src_offset=idx * self.dtype.itemsize,
+        )
         self.queue.finish()
         return float(dest[0])
 
