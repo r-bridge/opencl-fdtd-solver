@@ -296,12 +296,39 @@ class OpenCLFDTD(SourceMonitorMixin):
         self.kern_farfield_nl_to_eh = cl.Kernel(self.program, "farfield_nl_to_eh")
 
         # Cached launch geometries (coalesced: Nz, Ny, Nx).
-        self._gs_full = (self.Nz, self.Ny, self.Nx)
+        #
+        # Explicit local size: a warp-multiple along the fastest axis k. With
+        # local_size=None the driver must pick factors of the global size, and
+        # interior extents like 550 (= 2*5^2*11) force narrow non-warp-aligned
+        # groups that break coalescing. Global sizes are rounded up to the
+        # local size; kernels already bounds-guard the padding threads.
+        wg_cap = int(self.device.max_work_group_size)
+        for kern in (
+            self.kern_update_H_interior,
+            self.kern_update_H_pml,
+            self.kern_update_E_interior,
+            self.kern_update_E_pml,
+        ):
+            wg_cap = min(
+                wg_cap,
+                int(kern.get_work_group_info(cl.kernel_work_group_info.WORK_GROUP_SIZE, self.device)),
+            )
+        lk = 128
+        while lk > 1 and lk > wg_cap:
+            lk //= 2
+        self._ls_update = (lk, 1, 1)
+
+        def _pad(n_items):
+            return ((n_items + lk - 1) // lk) * lk
+
+        self._gs_full = (_pad(self.Nz), self.Ny, self.Nx)
         n = self.npml
         nx_i = self.Nx - 2 * n
         ny_i = self.Ny - 2 * n
         nz_i = self.Nz - 2 * n
-        self._gs_interior = (nz_i, ny_i, nx_i) if (nx_i > 0 and ny_i > 0 and nz_i > 0) else None
+        self._gs_interior = (
+            (_pad(nz_i), ny_i, nx_i) if (nx_i > 0 and ny_i > 0 and nz_i > 0) else None
+        )
 
     def add_source_Ex(self, z_src, amp, i0=None, i1=None, j0=None, j1=None):
         """Soft-add a sheet amplitude directly onto ``Ex`` (legacy field inject).
@@ -404,7 +431,7 @@ class OpenCLFDTD(SourceMonitorMixin):
                 self.kern_update_H_interior(
                     self.queue,
                     self._gs_interior,
-                    None,
+                    self._ls_update,
                     nx,
                     ny,
                     nz,
@@ -421,7 +448,7 @@ class OpenCLFDTD(SourceMonitorMixin):
             self.kern_update_H_pml(
                 self.queue,
                 self._gs_full,
-                None,
+                self._ls_update,
                 nx,
                 ny,
                 nz,
@@ -457,7 +484,7 @@ class OpenCLFDTD(SourceMonitorMixin):
             self.kern_update_H_pml(
                 self.queue,
                 self._gs_full,
-                None,
+                self._ls_update,
                 nx,
                 ny,
                 nz,
@@ -499,7 +526,7 @@ class OpenCLFDTD(SourceMonitorMixin):
                 self.kern_update_E_interior(
                     self.queue,
                     self._gs_interior,
-                    None,
+                    self._ls_update,
                     nx,
                     ny,
                     nz,
@@ -518,7 +545,7 @@ class OpenCLFDTD(SourceMonitorMixin):
             self.kern_update_E_pml(
                 self.queue,
                 self._gs_full,
-                None,
+                self._ls_update,
                 nx,
                 ny,
                 nz,
@@ -553,7 +580,7 @@ class OpenCLFDTD(SourceMonitorMixin):
             self.kern_update_E_pml(
                 self.queue,
                 self._gs_full,
-                None,
+                self._ls_update,
                 nx,
                 ny,
                 nz,
