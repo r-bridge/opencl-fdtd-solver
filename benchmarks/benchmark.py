@@ -38,7 +38,7 @@ def run_benchmark(shape=(100, 100, 100), steps=50, warmup=5):
     print("\n--- [1/2] Benchmarking NumPy CPU Reference ---")
     np_sim = NumPyFDTD(shape, dl, npml=npml)
     z_src = shape[2] - npml - 2
-    np_sim._sources.append(lambda f: setattr(f, "Ex", f.Ex + np.sin(2 * np.pi * freq * f.t)))
+    np_sim.add_source(lambda f: setattr(f, "Ex", f.Ex + np.sin(2 * np.pi * freq * f.t)))
 
     ctr_phys = (Nx * dl / 2, Ny * dl / 2, Nz * dl / 2)
     size_phys = (Nx * dl * 0.6, Ny * dl * 0.6, Nz * dl * 0.6)
@@ -58,7 +58,7 @@ def run_benchmark(shape=(100, 100, 100), steps=50, warmup=5):
         cl_sim = OpenCLFDTD(shape, dl, npml=npml)
     except MemoryError as exc:
         raise SystemExit(f"ERROR: insufficient device memory — {exc}") from exc
-    cl_sim._sources.append(lambda f: f.add_source_Ex(z_src, np.sin(2 * np.pi * freq * f.t)))
+    cl_sim.add_source(lambda f: f.add_source_Ex(z_src, np.sin(2 * np.pi * freq * f.t)))
     OpenCLNear2FarMonitor(cl_sim, ctr_phys, size_phys, freq)
 
     cl_sim.run(warmup)

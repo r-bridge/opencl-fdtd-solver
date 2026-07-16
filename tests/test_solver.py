@@ -59,8 +59,8 @@ class TestGenericFDTDSolver(unittest.TestCase):
             amp = np.sin(2 * np.pi * self.freq * f.t)
             f.add_source_Ex(z_src, amp)
 
-        np_sim._sources.append(np_source)
-        cl_sim._sources.append(cl_source)
+        np_sim.add_source(np_source)
+        cl_sim.add_source(cl_source)
 
         # Run both for 50 steps
         for _ in range(50):
@@ -84,7 +84,7 @@ class TestGenericFDTDSolver(unittest.TestCase):
         fdtd.set_epsilon(self.eps)
 
         z_src = self.shape[2] - self.npml - 2
-        fdtd._sources.append(lambda f: f.add_source_Ex(z_src, np.sin(2 * np.pi * self.freq * f.t)))
+        fdtd.add_source(lambda f: f.add_source_Ex(z_src, np.sin(2 * np.pi * self.freq * f.t)))
 
         ctr_phys = (30e-3, 30e-3, 30e-3)
         size_phys = (20e-3, 20e-3, 20e-3)

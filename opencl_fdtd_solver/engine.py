@@ -20,6 +20,7 @@ import numpy as np
 import pyopencl as cl
 
 from .kernels import load_kernel_source
+from .plugin import SourceMonitorMixin
 
 C0 = 299_792_458.0
 MU0 = 4e-7 * np.pi
@@ -60,7 +61,7 @@ def _default_opencl_runtime():
     return _DEFAULT_CTX, _DEFAULT_QUEUE, _DEFAULT_DEVICE
 
 
-class OpenCLFDTD:
+class OpenCLFDTD(SourceMonitorMixin):
     """
     3D Yee-grid FDTD electromagnetic solver accelerated with OpenCL.
 

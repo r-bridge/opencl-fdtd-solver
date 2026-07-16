@@ -55,7 +55,7 @@ class TestOpenCLNear2FarMonitor(unittest.TestCase):
         freq = 5e9
         fdtd = OpenCLFDTD(shape, dl, npml=npml)
         z = shape[2] - npml - 2
-        fdtd._sources.append(lambda f: f.add_source_Ex(z, np.sin(2 * np.pi * freq * f.t)))
+        fdtd.add_source(lambda f: f.add_source_Ex(z, np.sin(2 * np.pi * freq * f.t)))
         ctr = (shape[0] * dl / 2, shape[1] * dl / 2, shape[2] * dl / 2)
         size = (12 * dl, 12 * dl, 12 * dl)
         mon = OpenCLNear2FarMonitor(fdtd, ctr, size, freq)
@@ -112,7 +112,7 @@ class TestOpenCLNear2FarMonitor(unittest.TestCase):
         shape = (16, 16, 16)
         dl = 1e-3
         fdtd = OpenCLFDTD(shape, dl, npml=2)
-        fdtd._sources.append(lambda f: f.add_source_Ex(8, 0.05))
+        fdtd.add_source(lambda f: f.add_source_Ex(8, 0.05))
         mon = OpenCLNear2FarMonitor(fdtd, (8e-3, 8e-3, 8e-3), (2e-3, 2e-3, 2e-3), 5e9)
         self.assertLess(mon.n_face_samples, 256)
         fdtd.run(15)
@@ -156,7 +156,7 @@ class TestOpenCLNear2FarMonitor(unittest.TestCase):
         shape = (16, 16, 16)
         dl = 1e-3
         fdtd = OpenCLFDTD(shape, dl, npml=2)
-        fdtd._sources.append(lambda f: f.add_source_Ex(8, 0.05 * np.sin(2 * np.pi * 5e9 * f.t)))
+        fdtd.add_source(lambda f: f.add_source_Ex(8, 0.05 * np.sin(2 * np.pi * 5e9 * f.t)))
         mon = OpenCLNear2FarMonitor(fdtd, (8e-3, 8e-3, 8e-3), (2e-3, 2e-3, 2e-3), 5e9)
         self.assertLess(mon.n_face_samples, 256)
 
@@ -180,7 +180,7 @@ class TestNumPyNear2FarMonitor(unittest.TestCase):
         freq = 5e9
         fdtd = NumPyFDTD(shape, dl, npml=npml)
         z = shape[2] - npml - 2
-        fdtd._sources.append(
+        fdtd.add_source(
             lambda f: f.Ex.__setitem__(
                 (slice(None), slice(None), z),
                 f.Ex[:, :, z] + np.sin(2 * np.pi * freq * f.t),

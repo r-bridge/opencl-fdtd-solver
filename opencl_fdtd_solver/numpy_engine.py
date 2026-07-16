@@ -18,13 +18,15 @@
 
 import numpy as np
 
+from .plugin import SourceMonitorMixin
+
 C0 = 299_792_458.0
 MU0 = 4e-7 * np.pi
 EPS0 = 1.0 / (MU0 * C0**2)
 ETA0 = np.sqrt(MU0 / EPS0)
 
 
-class NumPyFDTD:
+class NumPyFDTD(SourceMonitorMixin):
     """
     3D Yee-grid FDTD electromagnetic solver running entirely on CPU using NumPy.
     Acts as a reference implementation and fallback when OpenCL is unavailable.

@@ -64,14 +64,14 @@ def _make_solver(eps: np.ndarray | None = None, *, compact_source: bool = False)
 
             cl.enqueue_copy(f.queue, f.Ex_buf, np.ascontiguousarray(ex))
 
-        fdtd._sources.append(source_cb)
+        fdtd.add_source(source_cb)
     else:
         z = _z_src()
 
         def source_cb(f):
             f.add_source_Ex(z, gaussian_sine_amp(f.t, FREQ, FWIDTH))
 
-        fdtd._sources.append(source_cb)
+        fdtd.add_source(source_cb)
     return fdtd
 
 
@@ -317,7 +317,7 @@ def run_opencl_pml_decay() -> dict[str, Any]:
     e_late = 0.0
     for step in range(n_total):
         if step == n_drive:
-            fdtd._sources.clear()
+            fdtd.clear_sources()
         fdtd.step()
         if step % 25 == 0 or step == n_total - 1:
             ex = fdtd.Ex
