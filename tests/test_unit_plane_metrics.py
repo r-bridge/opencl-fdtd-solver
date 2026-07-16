@@ -9,7 +9,6 @@ from __future__ import annotations
 import unittest
 
 import numpy as np
-
 from tests.meep_validation.plane_metrics import (
     build_discrepancy_document,
     case_report_dict,
@@ -36,9 +35,7 @@ class TestPlaneMetrics(unittest.TestCase):
         self.assertAlmostEqual(row.lms_scale, 2.0, places=5)
 
     def test_markdown_contains_tables(self):
-        row = measure_checkpoint(
-            np.ones((8, 8)), np.ones((8, 8)), npml=1, step=5
-        )
+        row = measure_checkpoint(np.ones((8, 8)), np.ones((8, 8)), npml=1, step=5)
         case = case_report_dict(
             name="toy",
             shape=[8, 8, 8],

@@ -28,12 +28,12 @@ from __future__ import annotations
 
 import argparse
 import os
-import sys
-import time
-import tempfile
-import subprocess
 import shutil
 import statistics
+import subprocess
+import sys
+import tempfile
+import time
 
 import numpy as np
 from opencl_fdtd_solver import OpenCLFDTD
@@ -47,7 +47,7 @@ DEFAULT_NPML = 25
 
 
 def estimate_gpu_memory_gb(shape, npml=DEFAULT_NPML):
-    return OpenCLFDTD.estimate_device_memory_bytes(shape, npml) / (1024 ** 3)
+    return OpenCLFDTD.estimate_device_memory_bytes(shape, npml) / (1024**3)
 
 
 def parse_shape(text: str) -> tuple[int, int, int]:
@@ -89,8 +89,8 @@ def run_opencl_benchmark(
         )
 
     needed = estimate_gpu_memory_gb(shape, npml)
-    budget = OpenCLFDTD.device_memory_budget_bytes(fdtd.device) / (1024 ** 3)
-    total = fdtd.device.global_mem_size / (1024 ** 3)
+    budget = OpenCLFDTD.device_memory_budget_bytes(fdtd.device) / (1024**3)
+    total = fdtd.device.global_mem_size / (1024**3)
     print(f"Device:  {fdtd.device.name}")
     print(f"VRAM:    {total:.2f} GB total, {budget:.2f} GB usable budget")
     print(f"Model:   ~{needed:.2f} GB float32 fields + face-local CPML buffers")
@@ -198,11 +198,16 @@ def run_meep_benchmark_in_docker(temp_dir, shape=DEFAULT_SHAPE, steps=DEFAULT_ST
 
     use_sg = sys.platform.startswith("linux")
     cmd = [
-        "docker", "run", "--rm",
-        "-v", f"{temp_dir}:/work",
-        "-w", "/work",
+        "docker",
+        "run",
+        "--rm",
+        "-v",
+        f"{temp_dir}:/work",
+        "-w",
+        "/work",
         "local-pymeep:latest",
-        "python", "meep_bench.py",
+        "python",
+        "meep_bench.py",
     ]
 
     print("Starting MEEP Simulation inside Docker (CPU)...")
@@ -211,7 +216,9 @@ def run_meep_benchmark_in_docker(temp_dir, shape=DEFAULT_SHAPE, steps=DEFAULT_ST
             cmd_str = " ".join(cmd)
             res = subprocess.run(
                 ["sg", "docker", "-c", cmd_str],
-                capture_output=True, text=True, check=True,
+                capture_output=True,
+                text=True,
+                check=True,
             )
         else:
             res = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -233,14 +240,19 @@ def run_meep_benchmark_in_docker(temp_dir, shape=DEFAULT_SHAPE, steps=DEFAULT_ST
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--shape", type=parse_shape, default=DEFAULT_SHAPE,
-                        help="Grid size N or Nx,Ny,Nz (default 600)")
+    parser.add_argument(
+        "--shape",
+        type=parse_shape,
+        default=DEFAULT_SHAPE,
+        help="Grid size N or Nx,Ny,Nz (default 600)",
+    )
     parser.add_argument("--steps", type=int, default=DEFAULT_STEPS)
     parser.add_argument("--warmup", type=int, default=DEFAULT_WARMUP)
     parser.add_argument("--repeats", type=int, default=DEFAULT_REPEATS)
     parser.add_argument("--npml", type=int, default=DEFAULT_NPML)
-    parser.add_argument("--skip-meep", action="store_true",
-                        help="Only time OpenCL (useful for large grids)")
+    parser.add_argument(
+        "--skip-meep", action="store_true", help="Only time OpenCL (useful for large grids)"
+    )
     args = parser.parse_args(argv)
 
     shape = args.shape
@@ -289,10 +301,7 @@ def main(argv=None):
     )
     if meep_time is not None:
         print(f"MEEP CPU (Docker):      {meep_time:7.2f}s ({meep_mcups:7.2f} MCUPS)")
-    print(
-        f"OpenCL FDTD (GPU):      {cl['time_s']:7.2f}s "
-        f"({cl['mcups_median']:7.1f} MCUPS median)"
-    )
+    print(f"OpenCL FDTD (GPU):      {cl['time_s']:7.2f}s ({cl['mcups_median']:7.1f} MCUPS median)")
     if speedup is not None:
         print(f"Performance Ratio:      {speedup:.2f}x (MEEP time / OpenCL time)")
         if speedup > 1.0:

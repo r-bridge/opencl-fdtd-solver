@@ -21,9 +21,8 @@ import pyopencl as cl
 
 from .kernels import load_kernel_source
 
-
-C0   = 299_792_458.0
-MU0  = 4e-7 * np.pi
+C0 = 299_792_458.0
+MU0 = 4e-7 * np.pi
 EPS0 = 1.0 / (MU0 * C0**2)
 ETA0 = np.sqrt(MU0 / EPS0)
 
@@ -64,7 +63,7 @@ def _default_opencl_runtime():
 class OpenCLFDTD:
     """
     3D Yee-grid FDTD electromagnetic solver accelerated with OpenCL.
-    
+
     Accepts 3D epsilon array, compiles OpenCL update kernels, and runs the simulation loop.
     Supports pluggable monitors (NumPy and OpenCL models).
     """
@@ -150,30 +149,29 @@ class OpenCLFDTD:
 
     def _build_cpml(self):
         """Calculate CPML coefficients and allocate face-local psi buffers on the GPU."""
-        dl   = self.dl
-        dt   = self.dt
+        dl = self.dl
+        dt = self.dt
         npml = self.npml
         Nx, Ny, Nz = self.Nx, self.Ny, self.Nz
 
-        m          = 3
-        sigma_opt  = 0.8 * (m + 1) / (2.0 * ETA0 * dl * npml) if npml > 0 else 0.0
-        alpha_max  = 0.05 / ETA0
+        m = 3
+        sigma_opt = 0.8 * (m + 1) / (2.0 * ETA0 * dl * npml) if npml > 0 else 0.0
+        alpha_max = 0.05 / ETA0
 
         def _1d_coeffs(n):
-            b = np.ones(n,  dtype=self.dtype)
+            b = np.ones(n, dtype=self.dtype)
             c = np.zeros(n, dtype=self.dtype)
-            k = np.ones(n,  dtype=self.dtype)
+            k = np.ones(n, dtype=self.dtype)
             for i in range(npml):
                 for lo, idx in ((True, i), (False, n - npml + i)):
                     xi = (npml - i) / npml if lo else (i + 1) / npml
-                    sig   = sigma_opt * xi**m
-                    kap   = 1.0
-                    alp   = alpha_max * (1.0 - xi)**1
+                    sig = sigma_opt * xi**m
+                    kap = 1.0
+                    alp = alpha_max * (1.0 - xi) ** 1
                     decay = (sig / kap + alp) * dt / EPS0
                     b[idx] = np.exp(-decay)
-                    denom  = sig + kap * alp
-                    c[idx] = 0.0 if denom == 0 else \
-                             sig / kap * (b[idx] - 1.0) / denom / dl
+                    denom = sig + kap * alp
+                    c[idx] = 0.0 if denom == 0 else sig / kap * (b[idx] - 1.0) / denom / dl
                     k[idx] = kap
             return b, c, k
 
@@ -261,10 +259,10 @@ class OpenCLFDTD:
                 int(self.MEMORY_HEADROOM_BYTES),
             )
             raise MemoryError(
-                f"Model needs ~{needed / (1024 ** 3):.2f} GB device memory, but "
-                f"{self.device.name} only has ~{budget / (1024 ** 3):.2f} GB usable "
-                f"({total / (1024 ** 3):.2f} GB total minus "
-                f"{reserve / (1024 ** 3):.2f} GB headroom). "
+                f"Model needs ~{needed / (1024**3):.2f} GB device memory, but "
+                f"{self.device.name} only has ~{budget / (1024**3):.2f} GB usable "
+                f"({total / (1024**3):.2f} GB total minus "
+                f"{reserve / (1024**3):.2f} GB headroom). "
                 f"Reduce the grid or npml; continuing would risk silent host paging "
                 f"and order-of-magnitude slower runs."
             )
@@ -284,12 +282,8 @@ class OpenCLFDTD:
         self.kern_add_source_Jx = cl.Kernel(self.program, "add_source_Jx")
         self.kern_accumulate_dft = cl.Kernel(self.program, "accumulate_dft")
         self.kern_accumulate_dft_face = cl.Kernel(self.program, "accumulate_dft_face")
-        self.kern_accumulate_dft_faces_fused = cl.Kernel(
-            self.program, "accumulate_dft_faces_fused"
-        )
-        self.kern_dft_rel_change_partial = cl.Kernel(
-            self.program, "dft_rel_change_partial"
-        )
+        self.kern_accumulate_dft_faces_fused = cl.Kernel(self.program, "accumulate_dft_faces_fused")
+        self.kern_dft_rel_change_partial = cl.Kernel(self.program, "dft_rel_change_partial")
         self.kern_farfield_accumulate_nl = cl.Kernel(self.program, "farfield_accumulate_nl")
         self.kern_farfield_nl_to_eh = cl.Kernel(self.program, "farfield_nl_to_eh")
 
@@ -318,10 +312,16 @@ class OpenCLFDTD:
             self.queue,
             (self.Ny, self.Nx),
             None,
-            np.int32(self.Nx), np.int32(self.Ny), np.int32(self.Nz),
-            np.int32(z_src), np.float32(amp),
-            np.int32(i0_i), np.int32(i1_i), np.int32(j0_i), np.int32(j1_i),
-            self.Ex_buf
+            np.int32(self.Nx),
+            np.int32(self.Ny),
+            np.int32(self.Nz),
+            np.int32(z_src),
+            np.float32(amp),
+            np.int32(i0_i),
+            np.int32(i1_i),
+            np.int32(j0_i),
+            np.int32(j1_i),
+            self.Ex_buf,
         )
 
     def add_source_Jx(
@@ -367,10 +367,17 @@ class OpenCLFDTD:
             self.queue,
             (self.Ny, self.Nx),
             None,
-            np.int32(self.Nx), np.int32(self.Ny), np.int32(self.Nz),
-            np.int32(z_src), np.float32(jx),
-            np.float32(self.dt), np.float32(EPS0),
-            np.int32(i0_i), np.int32(i1_i), np.int32(j0_i), np.int32(j1_i),
+            np.int32(self.Nx),
+            np.int32(self.Ny),
+            np.int32(self.Nz),
+            np.int32(z_src),
+            np.float32(jx),
+            np.float32(self.dt),
+            np.float32(EPS0),
+            np.int32(i0_i),
+            np.int32(i1_i),
+            np.int32(j0_i),
+            np.int32(j1_i),
             np.int32(1 if rim_taper else 0),
             np.float32(re),
             self.eps_buf,
@@ -387,38 +394,89 @@ class OpenCLFDTD:
         if self.npml > 0:
             if self._gs_interior is not None:
                 self.kern_update_H_interior(
-                    self.queue, self._gs_interior, None,
-                    nx, ny, nz, npml, dl, dtm_f,
-                    self.Ex_buf, self.Ey_buf, self.Ez_buf,
-                    self.Hx_buf, self.Hy_buf, self.Hz_buf,
+                    self.queue,
+                    self._gs_interior,
+                    None,
+                    nx,
+                    ny,
+                    nz,
+                    npml,
+                    dl,
+                    dtm_f,
+                    self.Ex_buf,
+                    self.Ey_buf,
+                    self.Ez_buf,
+                    self.Hx_buf,
+                    self.Hy_buf,
+                    self.Hz_buf,
                 )
             self.kern_update_H_pml(
-                self.queue, self._gs_full, None,
-                nx, ny, nz, npml, dl, dtm_f,
-                self.Ex_buf, self.Ey_buf, self.Ez_buf,
-                self.Hx_buf, self.Hy_buf, self.Hz_buf,
-                self.bx_buf, self.cx_buf, self.kx_buf,
-                self.by_buf, self.cy_buf, self.ky_buf,
-                self.bz_buf, self.cz_buf, self.kz_buf,
-                self.psi_Hx_y_buf, self.psi_Hx_z_buf,
-                self.psi_Hy_x_buf, self.psi_Hy_z_buf,
-                self.psi_Hz_x_buf, self.psi_Hz_y_buf,
+                self.queue,
+                self._gs_full,
+                None,
+                nx,
+                ny,
+                nz,
+                npml,
+                dl,
+                dtm_f,
+                self.Ex_buf,
+                self.Ey_buf,
+                self.Ez_buf,
+                self.Hx_buf,
+                self.Hy_buf,
+                self.Hz_buf,
+                self.bx_buf,
+                self.cx_buf,
+                self.kx_buf,
+                self.by_buf,
+                self.cy_buf,
+                self.ky_buf,
+                self.bz_buf,
+                self.cz_buf,
+                self.kz_buf,
+                self.psi_Hx_y_buf,
+                self.psi_Hx_z_buf,
+                self.psi_Hy_x_buf,
+                self.psi_Hy_z_buf,
+                self.psi_Hz_x_buf,
+                self.psi_Hz_y_buf,
             )
         else:
             # npml==0: use boundary-guarded full-domain kernel. The psi-free
             # interior kernel assumes a viable stencil neighborhood and will
             # read out-of-bounds if launched over the entire grid.
             self.kern_update_H_pml(
-                self.queue, self._gs_full, None,
-                nx, ny, nz, np.int32(0), dl, dtm_f,
-                self.Ex_buf, self.Ey_buf, self.Ez_buf,
-                self.Hx_buf, self.Hy_buf, self.Hz_buf,
-                self.bx_buf, self.cx_buf, self.kx_buf,
-                self.by_buf, self.cy_buf, self.ky_buf,
-                self.bz_buf, self.cz_buf, self.kz_buf,
-                self.psi_Hx_y_buf, self.psi_Hx_z_buf,
-                self.psi_Hy_x_buf, self.psi_Hy_z_buf,
-                self.psi_Hz_x_buf, self.psi_Hz_y_buf,
+                self.queue,
+                self._gs_full,
+                None,
+                nx,
+                ny,
+                nz,
+                np.int32(0),
+                dl,
+                dtm_f,
+                self.Ex_buf,
+                self.Ey_buf,
+                self.Ez_buf,
+                self.Hx_buf,
+                self.Hy_buf,
+                self.Hz_buf,
+                self.bx_buf,
+                self.cx_buf,
+                self.kx_buf,
+                self.by_buf,
+                self.cy_buf,
+                self.ky_buf,
+                self.bz_buf,
+                self.cz_buf,
+                self.kz_buf,
+                self.psi_Hx_y_buf,
+                self.psi_Hx_z_buf,
+                self.psi_Hy_x_buf,
+                self.psi_Hy_z_buf,
+                self.psi_Hz_x_buf,
+                self.psi_Hz_y_buf,
             )
 
     def _update_E(self):
@@ -431,38 +489,92 @@ class OpenCLFDTD:
         if self.npml > 0:
             if self._gs_interior is not None:
                 self.kern_update_E_interior(
-                    self.queue, self._gs_interior, None,
-                    nx, ny, nz, npml, dl, dt, eps0,
+                    self.queue,
+                    self._gs_interior,
+                    None,
+                    nx,
+                    ny,
+                    nz,
+                    npml,
+                    dl,
+                    dt,
+                    eps0,
                     self.eps_buf,
-                    self.Hx_buf, self.Hy_buf, self.Hz_buf,
-                    self.Ex_buf, self.Ey_buf, self.Ez_buf,
+                    self.Hx_buf,
+                    self.Hy_buf,
+                    self.Hz_buf,
+                    self.Ex_buf,
+                    self.Ey_buf,
+                    self.Ez_buf,
                 )
             self.kern_update_E_pml(
-                self.queue, self._gs_full, None,
-                nx, ny, nz, npml, dl, dt, eps0,
+                self.queue,
+                self._gs_full,
+                None,
+                nx,
+                ny,
+                nz,
+                npml,
+                dl,
+                dt,
+                eps0,
                 self.eps_buf,
-                self.Hx_buf, self.Hy_buf, self.Hz_buf,
-                self.Ex_buf, self.Ey_buf, self.Ez_buf,
-                self.bx_buf, self.cx_buf, self.kx_buf,
-                self.by_buf, self.cy_buf, self.ky_buf,
-                self.bz_buf, self.cz_buf, self.kz_buf,
-                self.psi_Ex_y_buf, self.psi_Ex_z_buf,
-                self.psi_Ey_x_buf, self.psi_Ey_z_buf,
-                self.psi_Ez_x_buf, self.psi_Ez_y_buf,
+                self.Hx_buf,
+                self.Hy_buf,
+                self.Hz_buf,
+                self.Ex_buf,
+                self.Ey_buf,
+                self.Ez_buf,
+                self.bx_buf,
+                self.cx_buf,
+                self.kx_buf,
+                self.by_buf,
+                self.cy_buf,
+                self.ky_buf,
+                self.bz_buf,
+                self.cz_buf,
+                self.kz_buf,
+                self.psi_Ex_y_buf,
+                self.psi_Ex_z_buf,
+                self.psi_Ey_x_buf,
+                self.psi_Ey_z_buf,
+                self.psi_Ez_x_buf,
+                self.psi_Ez_y_buf,
             )
         else:
             self.kern_update_E_pml(
-                self.queue, self._gs_full, None,
-                nx, ny, nz, np.int32(0), dl, dt, eps0,
+                self.queue,
+                self._gs_full,
+                None,
+                nx,
+                ny,
+                nz,
+                np.int32(0),
+                dl,
+                dt,
+                eps0,
                 self.eps_buf,
-                self.Hx_buf, self.Hy_buf, self.Hz_buf,
-                self.Ex_buf, self.Ey_buf, self.Ez_buf,
-                self.bx_buf, self.cx_buf, self.kx_buf,
-                self.by_buf, self.cy_buf, self.ky_buf,
-                self.bz_buf, self.cz_buf, self.kz_buf,
-                self.psi_Ex_y_buf, self.psi_Ex_z_buf,
-                self.psi_Ey_x_buf, self.psi_Ey_z_buf,
-                self.psi_Ez_x_buf, self.psi_Ez_y_buf,
+                self.Hx_buf,
+                self.Hy_buf,
+                self.Hz_buf,
+                self.Ex_buf,
+                self.Ey_buf,
+                self.Ez_buf,
+                self.bx_buf,
+                self.cx_buf,
+                self.kx_buf,
+                self.by_buf,
+                self.cy_buf,
+                self.ky_buf,
+                self.bz_buf,
+                self.cz_buf,
+                self.kz_buf,
+                self.psi_Ex_y_buf,
+                self.psi_Ex_z_buf,
+                self.psi_Ey_x_buf,
+                self.psi_Ey_z_buf,
+                self.psi_Ez_x_buf,
+                self.psi_Ez_y_buf,
             )
 
     def step(self):
@@ -500,14 +612,25 @@ class OpenCLFDTD:
         return float(dest[0])
 
     @property
-    def Ex(self): return self._read_field(self.Ex_buf)
+    def Ex(self):
+        return self._read_field(self.Ex_buf)
+
     @property
-    def Ey(self): return self._read_field(self.Ey_buf)
+    def Ey(self):
+        return self._read_field(self.Ey_buf)
+
     @property
-    def Ez(self): return self._read_field(self.Ez_buf)
+    def Ez(self):
+        return self._read_field(self.Ez_buf)
+
     @property
-    def Hx(self): return self._read_field(self.Hx_buf)
+    def Hx(self):
+        return self._read_field(self.Hx_buf)
+
     @property
-    def Hy(self): return self._read_field(self.Hy_buf)
+    def Hy(self):
+        return self._read_field(self.Hy_buf)
+
     @property
-    def Hz(self): return self._read_field(self.Hz_buf)
+    def Hz(self):
+        return self._read_field(self.Hz_buf)

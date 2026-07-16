@@ -43,12 +43,8 @@ def measure_farfield_case(
     )
     return {
         "main_lobe_max_abs_db_error": _round_metric(err),
-        "opencl_null_ratio": _round_metric(
-            null_ratio(ocl["eh_plus_z"], ocl["eh_plus_x"])
-        ),
-        "meep_null_ratio": _round_metric(
-            null_ratio(meep["eh_plus_z"], meep["eh_plus_x"])
-        ),
+        "opencl_null_ratio": _round_metric(null_ratio(ocl["eh_plus_z"], ocl["eh_plus_x"])),
+        "meep_null_ratio": _round_metric(null_ratio(meep["eh_plus_z"], meep["eh_plus_x"])),
     }
 
 
@@ -129,9 +125,7 @@ def discrepancy_farfield_markdown(doc: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def write_farfield_discrepancy_reports(
-    root: Path, doc: dict[str, Any]
-) -> tuple[Path, Path]:
+def write_farfield_discrepancy_reports(root: Path, doc: dict[str, Any]) -> tuple[Path, Path]:
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
     json_path = root / "discrepancy_report_farfield.json"

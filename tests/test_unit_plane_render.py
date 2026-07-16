@@ -11,7 +11,6 @@ import unittest
 from pathlib import Path
 
 import numpy as np
-
 from tests.meep_validation.plane_render import (
     compose_triptych,
     read_png_rgb,

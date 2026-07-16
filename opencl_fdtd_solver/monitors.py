@@ -19,16 +19,15 @@
 import numpy as np
 import pyopencl as cl
 
-
-C0   = 299_792_458.0
-MU0  = 4e-7 * np.pi
+C0 = 299_792_458.0
+MU0 = 4e-7 * np.pi
 EPS0 = 1.0 / (MU0 * C0**2)
 ETA0 = np.sqrt(MU0 / EPS0)
 
 
 class Near2FarBase:
     """Base class for Near-to-Far-Field monitors implementing the Huygens surface integration."""
-    
+
     def __init__(self, fdtd, center, size, freq):
         self.fdtd = fdtd
         self.freq = freq
@@ -41,20 +40,20 @@ class Near2FarBase:
         def _idx(phys, dl):
             return int(round(phys / dl))
 
-        self.ix0 = max(0, _idx(cx - sx/2, fdtd.dl))
-        self.ix1 = min(fdtd.Nx - 1, _idx(cx + sx/2, fdtd.dl))
-        self.iy0 = max(0, _idx(cy - sy/2, fdtd.dl))
-        self.iy1 = min(fdtd.Ny - 1, _idx(cy + sy/2, fdtd.dl))
-        self.iz0 = max(0, _idx(cz - sz/2, fdtd.dl))
-        self.iz1 = min(fdtd.Nz - 1, _idx(cz + sz/2, fdtd.dl))
+        self.ix0 = max(0, _idx(cx - sx / 2, fdtd.dl))
+        self.ix1 = min(fdtd.Nx - 1, _idx(cx + sx / 2, fdtd.dl))
+        self.iy0 = max(0, _idx(cy - sy / 2, fdtd.dl))
+        self.iy1 = min(fdtd.Ny - 1, _idx(cy + sy / 2, fdtd.dl))
+        self.iz0 = max(0, _idx(cz - sz / 2, fdtd.dl))
+        self.iz1 = min(fdtd.Nz - 1, _idx(cz + sz / 2, fdtd.dl))
 
         self._faces = [
-            ('x', self.ix0, -1),
-            ('x', self.ix1, +1),
-            ('y', self.iy0, -1),
-            ('y', self.iy1, +1),
-            ('z', self.iz0, -1),
-            ('z', self.iz1, +1),
+            ("x", self.ix0, -1),
+            ("x", self.ix1, +1),
+            ("y", self.iy0, -1),
+            ("y", self.iy1, +1),
+            ("z", self.iz0, -1),
+            ("z", self.iz1, +1),
         ]
         self._box = (self.ix0, self.ix1, self.iy0, self.iy1, self.iz0, self.iz1)
 
@@ -72,13 +71,15 @@ class Near2FarBase:
         Uses equivalent surface currents integrated over the Huygens box.
         """
         if self.Ex_dft is None:
-            raise RuntimeError("DFT fields not initialized. Run the simulation and fetch results first.")
+            raise RuntimeError(
+                "DFT fields not initialized. Run the simulation and fetch results first."
+            )
 
         dl = self.dl
         k = self.omega / C0
         ox, oy, oz = obs_point
         r = np.sqrt(ox**2 + oy**2 + oz**2)
-        rx, ry, rz = ox/r, oy/r, oz/r
+        rx, ry, rz = ox / r, oy / r, oz / r
 
         Nx_int = Ny_int = Nz_int = 0j
         Lx_int = Ly_int = Lz_int = 0j
@@ -89,38 +90,42 @@ class Near2FarBase:
             n = normal_sign
             dA = dl * dl
 
-            if face_axis == 'x':
+            if face_axis == "x":
                 i = face_idx
-                js = np.arange(iy0, iy1+1)
-                ks = np.arange(iz0, iz1+1)
-                jg, kg = np.meshgrid(js, ks, indexing='ij')
+                js = np.arange(iy0, iy1 + 1)
+                ks = np.arange(iz0, iz1 + 1)
+                jg, kg = np.meshgrid(js, ks, indexing="ij")
 
-                xp = i * dl; yp = jg * dl; zp = kg * dl
-                phase_factor = np.exp(1j * k * (rx*xp + ry*yp + rz*zp))
+                xp = i * dl
+                yp = jg * dl
+                zp = kg * dl
+                phase_factor = np.exp(1j * k * (rx * xp + ry * yp + rz * zp))
 
-                J_y =  n * self.Hz_dft[i, iy0:iy1+1, iz0:iz1+1]
-                J_z = -n * self.Hy_dft[i, iy0:iy1+1, iz0:iz1+1]
-                M_y = -n * self.Ez_dft[i, iy0:iy1+1, iz0:iz1+1]
-                M_z =  n * self.Ey_dft[i, iy0:iy1+1, iz0:iz1+1]
+                J_y = n * self.Hz_dft[i, iy0 : iy1 + 1, iz0 : iz1 + 1]
+                J_z = -n * self.Hy_dft[i, iy0 : iy1 + 1, iz0 : iz1 + 1]
+                M_y = -n * self.Ez_dft[i, iy0 : iy1 + 1, iz0 : iz1 + 1]
+                M_z = n * self.Ey_dft[i, iy0 : iy1 + 1, iz0 : iz1 + 1]
 
                 Ny_int += np.sum(J_y * phase_factor) * dA
                 Nz_int += np.sum(J_z * phase_factor) * dA
                 Ly_int += np.sum(M_y * phase_factor) * dA
                 Lz_int += np.sum(M_z * phase_factor) * dA
 
-            elif face_axis == 'y':
+            elif face_axis == "y":
                 j = face_idx
-                is_ = np.arange(ix0, ix1+1)
-                ks  = np.arange(iz0, iz1+1)
-                ig, kg = np.meshgrid(is_, ks, indexing='ij')
+                is_ = np.arange(ix0, ix1 + 1)
+                ks = np.arange(iz0, iz1 + 1)
+                ig, kg = np.meshgrid(is_, ks, indexing="ij")
 
-                xp = ig * dl; yp = j * dl; zp = kg * dl
-                phase_factor = np.exp(1j * k * (rx*xp + ry*yp + rz*zp))
+                xp = ig * dl
+                yp = j * dl
+                zp = kg * dl
+                phase_factor = np.exp(1j * k * (rx * xp + ry * yp + rz * zp))
 
-                J_x = -n * self.Hz_dft[ix0:ix1+1, j, iz0:iz1+1]
-                J_z =  n * self.Hx_dft[ix0:ix1+1, j, iz0:iz1+1]
-                M_x =  n * self.Ez_dft[ix0:ix1+1, j, iz0:iz1+1]
-                M_z = -n * self.Ex_dft[ix0:ix1+1, j, iz0:iz1+1]
+                J_x = -n * self.Hz_dft[ix0 : ix1 + 1, j, iz0 : iz1 + 1]
+                J_z = n * self.Hx_dft[ix0 : ix1 + 1, j, iz0 : iz1 + 1]
+                M_x = n * self.Ez_dft[ix0 : ix1 + 1, j, iz0 : iz1 + 1]
+                M_z = -n * self.Ex_dft[ix0 : ix1 + 1, j, iz0 : iz1 + 1]
 
                 Nx_int += np.sum(J_x * phase_factor) * dA
                 Nz_int += np.sum(J_z * phase_factor) * dA
@@ -129,17 +134,19 @@ class Near2FarBase:
 
             else:  # face_axis == 'z'
                 kk = face_idx
-                is_ = np.arange(ix0, ix1+1)
-                js  = np.arange(iy0, iy1+1)
-                ig, jg = np.meshgrid(is_, js, indexing='ij')
+                is_ = np.arange(ix0, ix1 + 1)
+                js = np.arange(iy0, iy1 + 1)
+                ig, jg = np.meshgrid(is_, js, indexing="ij")
 
-                xp = ig * dl; yp = jg * dl; zp = kk * dl
-                phase_factor = np.exp(1j * k * (rx*xp + ry*yp + rz*zp))
+                xp = ig * dl
+                yp = jg * dl
+                zp = kk * dl
+                phase_factor = np.exp(1j * k * (rx * xp + ry * yp + rz * zp))
 
-                J_x =  n * self.Hy_dft[ix0:ix1+1, iy0:iy1+1, kk]
-                J_y = -n * self.Hx_dft[ix0:ix1+1, iy0:iy1+1, kk]
-                M_x = -n * self.Ey_dft[ix0:ix1+1, iy0:iy1+1, kk]
-                M_y =  n * self.Ex_dft[ix0:ix1+1, iy0:iy1+1, kk]
+                J_x = n * self.Hy_dft[ix0 : ix1 + 1, iy0 : iy1 + 1, kk]
+                J_y = -n * self.Hx_dft[ix0 : ix1 + 1, iy0 : iy1 + 1, kk]
+                M_x = -n * self.Ey_dft[ix0 : ix1 + 1, iy0 : iy1 + 1, kk]
+                M_y = n * self.Ex_dft[ix0 : ix1 + 1, iy0 : iy1 + 1, kk]
 
                 Nx_int += np.sum(J_x * phase_factor) * dA
                 Ny_int += np.sum(J_y * phase_factor) * dA
@@ -158,10 +165,16 @@ class Near2FarBase:
         E_far = prefactor * (ETA0 * N_t + rxL)
         H_far = -np.cross(rhat, E_far) / ETA0
 
-        return np.array([
-            E_far[0], E_far[1], E_far[2],
-            H_far[0], H_far[1], H_far[2],
-        ])
+        return np.array(
+            [
+                E_far[0],
+                E_far[1],
+                E_far[2],
+                H_far[0],
+                H_far[1],
+                H_far[2],
+            ]
+        )
 
 
 class NumPyNear2FarMonitor(Near2FarBase):
@@ -169,7 +182,7 @@ class NumPyNear2FarMonitor(Near2FarBase):
     Near-to-Far-Field monitor using NumPy for CPU-based accumulation.
     Fetches the 3D fields from the solver at each step.
     """
-    
+
     def __init__(self, fdtd, center, size, freq):
         super().__init__(fdtd, center, size, freq)
         shape = (fdtd.Nx, fdtd.Ny, fdtd.Nz)
@@ -188,12 +201,12 @@ class NumPyNear2FarMonitor(Near2FarBase):
         # Only accumulate on box faces
         def _add(dft, field):
             arr = np.asarray(field)
-            dft[ix0, iy0:iy1+1, iz0:iz1+1] += phase * arr[ix0, iy0:iy1+1, iz0:iz1+1]
-            dft[ix1, iy0:iy1+1, iz0:iz1+1] += phase * arr[ix1, iy0:iy1+1, iz0:iz1+1]
-            dft[ix0:ix1+1, iy0, iz0:iz1+1] += phase * arr[ix0:ix1+1, iy0, iz0:iz1+1]
-            dft[ix0:ix1+1, iy1, iz0:iz1+1] += phase * arr[ix0:ix1+1, iy1, iz0:iz1+1]
-            dft[ix0:ix1+1, iy0:iy1+1, iz0] += phase * arr[ix0:ix1+1, iy0:iy1+1, iz0]
-            dft[ix0:ix1+1, iy0:iy1+1, iz1] += phase * arr[ix0:ix1+1, iy0:iy1+1, iz1]
+            dft[ix0, iy0 : iy1 + 1, iz0 : iz1 + 1] += phase * arr[ix0, iy0 : iy1 + 1, iz0 : iz1 + 1]
+            dft[ix1, iy0 : iy1 + 1, iz0 : iz1 + 1] += phase * arr[ix1, iy0 : iy1 + 1, iz0 : iz1 + 1]
+            dft[ix0 : ix1 + 1, iy0, iz0 : iz1 + 1] += phase * arr[ix0 : ix1 + 1, iy0, iz0 : iz1 + 1]
+            dft[ix0 : ix1 + 1, iy1, iz0 : iz1 + 1] += phase * arr[ix0 : ix1 + 1, iy1, iz0 : iz1 + 1]
+            dft[ix0 : ix1 + 1, iy0 : iy1 + 1, iz0] += phase * arr[ix0 : ix1 + 1, iy0 : iy1 + 1, iz0]
+            dft[ix0 : ix1 + 1, iy0 : iy1 + 1, iz1] += phase * arr[ix0 : ix1 + 1, iy0 : iy1 + 1, iz1]
 
         _add(self.Ex_dft, fdtd.Ex)
         _add(self.Ey_dft, fdtd.Ey)
@@ -270,9 +283,12 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         self._phase = None
         self._offs_i32 = tuple(np.int32(o) for o in self._face_offsets)
         self._box_i32 = (
-            np.int32(self.ix0), np.int32(self.ix1),
-            np.int32(self.iy0), np.int32(self.iy1),
-            np.int32(self.iz0), np.int32(self.iz1),
+            np.int32(self.ix0),
+            np.int32(self.ix1),
+            np.int32(self.iy0),
+            np.int32(self.iy1),
+            np.int32(self.iz0),
+            np.int32(self.iz1),
         )
         self._n_face_i32 = np.int32(self.n_face_samples)
         self._nx_i32 = np.int32(fdtd.Nx)
@@ -297,9 +313,7 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         mf = cl.mem_flags
         fdtd = self.fdtd
         nbytes = self.n_face_samples * 8
-        self._dft_snap = tuple(
-            cl.Buffer(fdtd.ctx, mf.READ_WRITE, nbytes) for _ in range(6)
-        )
+        self._dft_snap = tuple(cl.Buffer(fdtd.ctx, mf.READ_WRITE, nbytes) for _ in range(6))
         zeros = np.zeros(self.n_face_samples * 2, dtype=np.float32)
         for buf in self._dft_snap:
             cl.enqueue_copy(fdtd.queue, buf, zeros)
@@ -332,19 +346,25 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         mf = cl.mem_flags
         if self._dft_rel_n_groups < n_groups:
             self._dft_rel_n_groups = n_groups
-            self._dft_rel_partial_num = cl.Buffer(
-                fdtd.ctx, mf.WRITE_ONLY, n_groups * 4
-            )
-            self._dft_rel_partial_den = cl.Buffer(
-                fdtd.ctx, mf.WRITE_ONLY, n_groups * 4
-            )
+            self._dft_rel_partial_num = cl.Buffer(fdtd.ctx, mf.WRITE_ONLY, n_groups * 4)
+            self._dft_rel_partial_den = cl.Buffer(fdtd.ctx, mf.WRITE_ONLY, n_groups * 4)
 
         cur = self._dft_bufs()
         prev = self._dft_snap
         fdtd.kern_dft_rel_change_partial.set_args(
             np.int32(n),
-            cur[0], cur[1], cur[2], cur[3], cur[4], cur[5],
-            prev[0], prev[1], prev[2], prev[3], prev[4], prev[5],
+            cur[0],
+            cur[1],
+            cur[2],
+            cur[3],
+            cur[4],
+            cur[5],
+            prev[0],
+            prev[1],
+            prev[2],
+            prev[3],
+            prev[4],
+            prev[5],
             self._dft_rel_partial_num,
             self._dft_rel_partial_den,
             cl.LocalMemory(lsize * 4),
@@ -382,15 +402,36 @@ class OpenCLNear2FarMonitor(Near2FarBase):
             fdtd.queue,
             (self.n_face_samples,),
             None,
-            self._nx_i32, self._ny_i32, self._nz_i32,
-            ix0, ix1, iy0, iy1, iz0, iz1,
-            o0, o1, o2, o3, o4, o5,
+            self._nx_i32,
+            self._ny_i32,
+            self._nz_i32,
+            ix0,
+            ix1,
+            iy0,
+            iy1,
+            iz0,
+            iz1,
+            o0,
+            o1,
+            o2,
+            o3,
+            o4,
+            o5,
             self._n_face_i32,
-            pr, pi,
-            fdtd.Ex_buf, fdtd.Ey_buf, fdtd.Ez_buf,
-            fdtd.Hx_buf, fdtd.Hy_buf, fdtd.Hz_buf,
-            self.Ex_dft_buf, self.Ey_dft_buf, self.Ez_dft_buf,
-            self.Hx_dft_buf, self.Hy_dft_buf, self.Hz_dft_buf,
+            pr,
+            pi,
+            fdtd.Ex_buf,
+            fdtd.Ey_buf,
+            fdtd.Ez_buf,
+            fdtd.Hx_buf,
+            fdtd.Hy_buf,
+            fdtd.Hz_buf,
+            self.Ex_dft_buf,
+            self.Ey_dft_buf,
+            self.Ez_dft_buf,
+            self.Hx_dft_buf,
+            self.Hy_dft_buf,
+            self.Hz_dft_buf,
         )
 
     def _ensure_obs_bufs(self, n_obs: int) -> None:
@@ -450,10 +491,18 @@ class OpenCLNear2FarMonitor(Near2FarBase):
             self._obs_buf,
             k_wave,
             dl,
-            np.int32(self.ix0), np.int32(self.ix1),
-            np.int32(self.iy0), np.int32(self.iy1),
-            np.int32(self.iz0), np.int32(self.iz1),
-            offs[0], offs[1], offs[2], offs[3], offs[4], offs[5],
+            np.int32(self.ix0),
+            np.int32(self.ix1),
+            np.int32(self.iy0),
+            np.int32(self.iy1),
+            np.int32(self.iz0),
+            np.int32(self.iz1),
+            offs[0],
+            offs[1],
+            offs[2],
+            offs[3],
+            offs[4],
+            offs[5],
             self.Ex_dft_buf,
             self.Ey_dft_buf,
             self.Ez_dft_buf,
@@ -504,9 +553,7 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         n = max(3, int(n_angles))
         angles = np.linspace(-180.0, 180.0, n, dtype=np.float64)
         rad = np.deg2rad(angles)
-        pts = np.column_stack(
-            [R * np.sin(rad), np.zeros(n), R * np.cos(rad)]
-        ).astype(np.float32)
+        pts = np.column_stack([R * np.sin(rad), np.zeros(n), R * np.cos(rad)]).astype(np.float32)
         eh = self.get_farfields(pts)
         db = np.empty(n, dtype=np.float64)
         for i in range(n):

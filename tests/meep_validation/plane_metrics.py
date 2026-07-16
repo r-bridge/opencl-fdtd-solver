@@ -165,9 +165,7 @@ def build_discrepancy_document(
             "raw_residual_energy_ratio": (
                 "∑(OpenCL−Meep)² / ∑OpenCL² without amplitude alignment."
             ),
-            "aligned_residual_energy_ratio": (
-                "∑(OpenCL−scale·Meep)² / ∑OpenCL² after LMS scale."
-            ),
+            "aligned_residual_energy_ratio": ("∑(OpenCL−scale·Meep)² / ∑OpenCL² after LMS scale."),
             "peak_ratio": "peak|OpenCL| / peak|Meep| on the non-PML mask.",
             "mid_x_lag_cells": (
                 "Integer lag maximizing mid-x lineout cross-correlation "
@@ -211,8 +209,8 @@ def discrepancy_markdown(doc: dict[str, Any]) -> str:
                 "",
                 "### Summary",
                 "",
-                f"| mean corr | mean LMS scale | mean raw res/E | mean aligned res/E | max \\|lag\\| |",
-                f"|----------:|---------------:|---------------:|-------------------:|----------:|",
+                "| mean corr | mean LMS scale | mean raw res/E | mean aligned res/E | max \\|lag\\| |",
+                "|----------:|---------------:|---------------:|-------------------:|----------:|",
             ]
         )
         s = case["summary"]

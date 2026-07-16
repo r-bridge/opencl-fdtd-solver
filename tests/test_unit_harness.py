@@ -12,7 +12,6 @@ import os
 import unittest
 
 import numpy as np
-
 from tests.meep_validation.harness import (
     C0,
     EPS0,
@@ -39,7 +38,9 @@ class TestHarnessMath(unittest.TestCase):
     def test_meep_jx_from_si_unit_conversion(self):
         # Raw: J_meep = J_si * (1 mm) / (ε₀ c) so ΔE matches when E is compared numerically.
         self.assertAlmostEqual(meep_jx_from_si(1.0), 1e-3 / (EPS0 * C0), places=12)
-        self.assertAlmostEqual(meep_jx_from_si(2.0, length_unit_m=1.0), 2.0 / (EPS0 * C0), places=12)
+        self.assertAlmostEqual(
+            meep_jx_from_si(2.0, length_unit_m=1.0), 2.0 / (EPS0 * C0), places=12
+        )
         # Planar Meep sources store amp *= resolution; cancel for sheet ΔE match.
         dl_mm = 2.5
         res = 1.0 / dl_mm

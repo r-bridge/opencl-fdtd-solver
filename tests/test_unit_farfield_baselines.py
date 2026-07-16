@@ -10,7 +10,6 @@ from __future__ import annotations
 import unittest
 
 import numpy as np
-
 from tests.meep_validation.farfield_metrics import measure_farfield_case, null_ratio
 from tests.meep_validation.farfield_render import compose_pattern_overlay
 
@@ -20,7 +19,6 @@ class TestFarfieldMetrics(unittest.TestCase):
         main = np.array([1, 0, 0, 0, 0, 0], dtype=np.complex128)
         null = np.array([0.01, 0, 0, 0, 0, 0], dtype=np.complex128)
         self.assertAlmostEqual(null_ratio(main, null), 0.01, places=12)
-        angles = np.linspace(-180, 180, 5)
         ocl_db = np.array([0.0, -3.0, -10.0, -3.0, 0.0])
         meep_db = ocl_db + 0.5
         ocl = {"eh_plus_z": main, "eh_plus_x": null}
