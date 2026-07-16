@@ -85,9 +85,7 @@ class OpenCLFDTD(SourceMonitorMixin):
         self.npml = int(npml)
         dtype = np.dtype(dtype)
         if dtype != np.float32:
-            raise ValueError(
-                f"OpenCLFDTD only supports float32 computation; got {dtype!r}"
-            )
+            raise ValueError(f"OpenCLFDTD only supports float32 computation; got {dtype!r}")
         self.dtype = dtype
         self.t = 0.0
         self.step_num = 0
