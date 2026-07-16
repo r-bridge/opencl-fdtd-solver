@@ -10,9 +10,9 @@
       "checkpoints": [
         {
           "aligned_residual_energy_ratio": 0.014933113,
-          "lms_scale": 1.031302,
+          "lms_scale": 1.0313021,
           "mid_x_lag_cells": 0,
-          "peak_meep": 7.450646e-06,
+          "peak_meep": 7.4506461e-06,
           "peak_opencl": 9.8209048e-06,
           "peak_ratio": 1.3181279,
           "pearson_corr": 0.98928249,
@@ -20,21 +20,21 @@
           "step": 20
         },
         {
-          "aligned_residual_energy_ratio": 0.0086309543,
+          "aligned_residual_energy_ratio": 0.0086309541,
           "lms_scale": 1.0110168,
           "mid_x_lag_cells": 0,
-          "peak_meep": 2.74487e-05,
+          "peak_meep": 2.7448701e-05,
           "peak_opencl": 3.4835062e-05,
-          "peak_ratio": 1.269097,
+          "peak_ratio": 1.2690969,
           "pearson_corr": 0.99422746,
-          "raw_residual_energy_ratio": 0.0087486696,
+          "raw_residual_energy_ratio": 0.0087486694,
           "step": 40
         },
         {
           "aligned_residual_energy_ratio": 0.021392652,
           "lms_scale": 1.0091216,
           "mid_x_lag_cells": 0,
-          "peak_meep": 0.00011202448,
+          "peak_meep": 0.00011202449,
           "peak_opencl": 0.00014318881,
           "peak_ratio": 1.2781921,
           "pearson_corr": 0.98621565,
@@ -45,11 +45,11 @@
           "aligned_residual_energy_ratio": 0.052350685,
           "lms_scale": 0.98413619,
           "mid_x_lag_cells": 0,
-          "peak_meep": 0.00038452466,
+          "peak_meep": 0.00038452467,
           "peak_opencl": 0.00048059926,
           "peak_ratio": 1.2498529,
-          "pearson_corr": 0.96680484,
-          "raw_residual_energy_ratio": 0.052596922,
+          "pearson_corr": 0.96680485,
+          "raw_residual_energy_ratio": 0.052596921,
           "step": 80
         }
       ],
@@ -74,7 +74,7 @@
       "summary": {
         "max_abs_mid_x_lag_cells": 0.0,
         "mean_aligned_residual_energy_ratio": 0.024326851,
-        "mean_lms_scale": 1.0088941,
+        "mean_lms_scale": 1.0088942,
         "mean_pearson_corr": 0.98413261,
         "mean_raw_residual_energy_ratio": 0.0246647
       }
@@ -91,7 +91,7 @@
           "aligned_residual_energy_ratio": 0.015383438,
           "lms_scale": 1.0300528,
           "mid_x_lag_cells": 0,
-          "peak_meep": 7.450646e-06,
+          "peak_meep": 7.4506461e-06,
           "peak_opencl": 9.8209048e-06,
           "peak_ratio": 1.3181279,
           "pearson_corr": 0.98910053,
@@ -99,14 +99,14 @@
           "step": 20
         },
         {
-          "aligned_residual_energy_ratio": 0.0094080026,
+          "aligned_residual_energy_ratio": 0.0094080028,
           "lms_scale": 1.0044334,
           "mid_x_lag_cells": 0,
           "peak_meep": 2.7490407e-05,
           "peak_opencl": 3.4909212e-05,
-          "peak_ratio": 1.2698688,
+          "peak_ratio": 1.2698689,
           "pearson_corr": 0.99367408,
-          "raw_residual_energy_ratio": 0.0094273014,
+          "raw_residual_energy_ratio": 0.0094273017,
           "step": 40
         },
         {
@@ -117,18 +117,18 @@
           "peak_opencl": 0.00014374168,
           "peak_ratio": 1.2769832,
           "pearson_corr": 0.98571098,
-          "raw_residual_energy_ratio": 0.021473584,
+          "raw_residual_energy_ratio": 0.021473583,
           "step": 60
         },
         {
           "aligned_residual_energy_ratio": 0.046062015,
-          "lms_scale": 0.99435517,
+          "lms_scale": 0.99435516,
           "mid_x_lag_cells": 0,
           "peak_meep": 0.00038679349,
           "peak_opencl": 0.00048254369,
           "peak_ratio": 1.2475486,
           "pearson_corr": 0.96916921,
-          "raw_residual_energy_ratio": 0.046092758,
+          "raw_residual_energy_ratio": 0.046092757,
           "step": 80
         }
       ],

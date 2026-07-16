@@ -4,12 +4,12 @@ Objective comparison of mid-plane Ex between this OpenCL Yee/CPML solver and Mee
 
 ## Metric definitions
 
-- **`pearson_corr`:** Pearson correlation of signed Ex after least-squares scaling Meep onto OpenCL (shape/phase agreement; amplitude removed).
-- **`lms_scale`:** Least-squares scale such that OpenCL ≈ scale · Meep. Near 1.0 means absolute amplitude agreement after source matching.
-- **`raw_residual_energy_ratio`:** ∑(OpenCL−Meep)² / ∑OpenCL² without amplitude alignment.
 - **`aligned_residual_energy_ratio`:** ∑(OpenCL−scale·Meep)² / ∑OpenCL² after LMS scale.
-- **`peak_ratio`:** peak|OpenCL| / peak|Meep| on the non-PML mask.
+- **`lms_scale`:** Least-squares scale such that OpenCL ≈ scale · Meep. Near 1.0 means absolute amplitude agreement after source matching.
 - **`mid_x_lag_cells`:** Integer lag maximizing mid-x lineout cross-correlation (Meep shifted relative to OpenCL).
+- **`peak_ratio`:** peak|OpenCL| / peak|Meep| on the non-PML mask.
+- **`pearson_corr`:** Pearson correlation of signed Ex after least-squares scaling Meep onto OpenCL (shape/phase agreement; amplitude removed).
+- **`raw_residual_energy_ratio`:** ∑(OpenCL−Meep)² / ∑OpenCL² without amplitude alignment.
 
 ## Case `vacuum_sheet`
 

@@ -491,9 +491,7 @@ class TestDeviceSelectionFallbacks(unittest.TestCase):
             mock.patch.dict(os.environ, {"IGNORE_GPU": "NVIDIA,AMD"}),
             mock.patch("opencl_fdtd_solver.engine.cl.get_platforms", return_value=[plat]),
             mock.patch("opencl_fdtd_solver.engine.cl.Context", return_value=fake_ctx) as ctx_ctor,
-            mock.patch(
-                "opencl_fdtd_solver.engine.cl.CommandQueue", return_value=fake_queue
-            ),
+            mock.patch("opencl_fdtd_solver.engine.cl.CommandQueue", return_value=fake_queue),
         ):
             ctx, queue, device = _default_opencl_runtime()
 
@@ -520,9 +518,7 @@ class TestDeviceSelectionFallbacks(unittest.TestCase):
             mock.patch.dict(os.environ, {"IGNORE_GPU": "AMD"}),
             mock.patch("opencl_fdtd_solver.engine.cl.get_platforms", return_value=[plat]),
             mock.patch("opencl_fdtd_solver.engine.cl.Context", return_value=fake_ctx),
-            mock.patch(
-                "opencl_fdtd_solver.engine.cl.CommandQueue", return_value=fake_queue
-            ),
+            mock.patch("opencl_fdtd_solver.engine.cl.CommandQueue", return_value=fake_queue),
         ):
             _, _, device = _default_opencl_runtime()
 

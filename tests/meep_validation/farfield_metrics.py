@@ -130,8 +130,12 @@ def write_farfield_discrepancy_reports(root: Path, doc: dict[str, Any]) -> tuple
     root.mkdir(parents=True, exist_ok=True)
     json_path = root / "discrepancy_report_farfield.json"
     md_path = root / "DISCREPANCY_REPORT_FARFIELD.md"
-    json_path.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    md_path.write_text(discrepancy_farfield_markdown(doc), encoding="utf-8")
+    # Round-trip so committed JSON matches a remasure + json.loads comparison.
+    doc = json.loads(json.dumps(doc, sort_keys=True))
+    json_path.write_text(
+        json.dumps(doc, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
+    )
+    md_path.write_text(discrepancy_farfield_markdown(doc), encoding="utf-8", newline="\n")
     return json_path, md_path
 
 
