@@ -20,7 +20,8 @@ import warnings
 
 import numpy as np
 
-from .constants import C0, EPS0, ETA0, MU0
+from .constants import C0, EPS0, MU0
+from .cpml import build_cpml_profiles
 from .materials import yee_edge_ce
 from .plugin import SourceMonitorMixin
 
@@ -152,46 +153,26 @@ class NumPyFDTD(SourceMonitorMixin):
         self.Ex[sl_i, sl_j, z] += soft.astype(self.dtype, copy=False)
 
     def _build_cpml(self):
-        dl = self.dl
-        dt = self.dt
-        npml = self.npml
         Nx, Ny, Nz = self.Nx, self.Ny, self.Nz
+        profiles = build_cpml_profiles(
+            (Nx, Ny, Nz), npml=self.npml, dl=self.dl, dt=self.dt, dtype=self.dtype
+        )
 
-        m = 3
-        sigma_opt = 0.8 * (m + 1) / (2.0 * ETA0 * dl * npml)
-        alpha_max = 0.05 / ETA0
+        def _bcast(prof, axis: int):
+            shape = [1, 1, 1]
+            shape[axis] = -1
+            return (
+                prof.b.reshape(shape),
+                prof.c.reshape(shape),
+                prof.kappa.reshape(shape),
+            )
 
-        def _1d_coeffs(n):
-            b = np.ones(n, dtype=self.dtype)
-            c = np.zeros(n, dtype=self.dtype)
-            k = np.ones(n, dtype=self.dtype)
-            for i in range(npml):
-                for lo, idx in ((True, i), (False, n - npml + i)):
-                    xi = (npml - i) / npml if lo else (i + 1) / npml
-                    sig = sigma_opt * xi**m
-                    kap = 1.0
-                    alp = alpha_max * (1.0 - xi) ** 1
-                    decay = (sig / kap + alp) * dt / EPS0
-                    b[idx] = np.exp(-decay)
-                    denom = sig + kap * alp
-                    c[idx] = 0.0 if denom == 0 else sig / kap * (b[idx] - 1.0) / denom / dl
-                    k[idx] = kap
-            return b, c, k
-
-        bx, cx, kx = _1d_coeffs(Nx)
-        by, cy, ky = _1d_coeffs(Ny)
-        bz, cz, kz = _1d_coeffs(Nz)
-
-        # Reshape for broadcasting
-        self._bx = bx.reshape(Nx, 1, 1)
-        self._cx = cx.reshape(Nx, 1, 1)
-        self._kx = kx.reshape(Nx, 1, 1)
-        self._by = by.reshape(1, Ny, 1)
-        self._cy = cy.reshape(1, Ny, 1)
-        self._ky = ky.reshape(1, Ny, 1)
-        self._bz = bz.reshape(1, 1, Nz)
-        self._cz = cz.reshape(1, 1, Nz)
-        self._kz = kz.reshape(1, 1, Nz)
+        self._bx_h, self._cx_h, self._kx_h = _bcast(profiles.h[0], 0)
+        self._by_h, self._cy_h, self._ky_h = _bcast(profiles.h[1], 1)
+        self._bz_h, self._cz_h, self._kz_h = _bcast(profiles.h[2], 2)
+        self._bx_e, self._cx_e, self._kx_e = _bcast(profiles.e[0], 0)
+        self._by_e, self._cy_e, self._ky_e = _bcast(profiles.e[1], 1)
+        self._bz_e, self._cz_e, self._kz_e = _bcast(profiles.e[2], 2)
 
         # CPML auxiliary variables
         dt_aux = self.psi_dtype
@@ -240,29 +221,29 @@ class NumPyFDTD(SourceMonitorMixin):
         dEy_dx = self._fwd(Ey, 0)
         dEx_dy = self._fwd(Ex, 1)
 
-        self._psi_Hx_y = self._by * self._psi_Hx_y + self._cy * dEz_dy
-        self._psi_Hx_z = self._bz * self._psi_Hx_z + self._cz * dEy_dz
-        self._psi_Hy_x = self._bx * self._psi_Hy_x + self._cx * dEz_dx
-        self._psi_Hy_z = self._bz * self._psi_Hy_z + self._cz * dEx_dz
-        self._psi_Hz_x = self._bx * self._psi_Hz_x + self._cx * dEy_dx
-        self._psi_Hz_y = self._by * self._psi_Hz_y + self._cy * dEx_dy
+        self._psi_Hx_y = self._by_h * self._psi_Hx_y + self._cy_h * dEz_dy
+        self._psi_Hx_z = self._bz_h * self._psi_Hx_z + self._cz_h * dEy_dz
+        self._psi_Hy_x = self._bx_h * self._psi_Hy_x + self._cx_h * dEz_dx
+        self._psi_Hy_z = self._bz_h * self._psi_Hy_z + self._cz_h * dEx_dz
+        self._psi_Hz_x = self._bx_h * self._psi_Hz_x + self._cx_h * dEy_dx
+        self._psi_Hz_y = self._by_h * self._psi_Hz_y + self._cy_h * dEx_dy
 
         self.Hx -= dtm * (
-            dEz_dy / (self._ky * self.dl)
+            dEz_dy / (self._ky_h * self.dl)
             + self._psi_Hx_y
-            - dEy_dz / (self._kz * self.dl)
+            - dEy_dz / (self._kz_h * self.dl)
             - self._psi_Hx_z
         )
         self.Hy -= dtm * (
-            dEx_dz / (self._kz * self.dl)
+            dEx_dz / (self._kz_h * self.dl)
             + self._psi_Hy_z
-            - dEz_dx / (self._kx * self.dl)
+            - dEz_dx / (self._kx_h * self.dl)
             - self._psi_Hy_x
         )
         self.Hz -= dtm * (
-            dEy_dx / (self._kx * self.dl)
+            dEy_dx / (self._kx_h * self.dl)
             + self._psi_Hz_x
-            - dEx_dy / (self._ky * self.dl)
+            - dEx_dy / (self._ky_h * self.dl)
             - self._psi_Hz_y
         )
 
@@ -276,29 +257,29 @@ class NumPyFDTD(SourceMonitorMixin):
         dHy_dx = self._bwd(Hy, 0)
         dHx_dy = self._bwd(Hx, 1)
 
-        self._psi_Ex_y = self._by * self._psi_Ex_y + self._cy * dHz_dy
-        self._psi_Ex_z = self._bz * self._psi_Ex_z + self._cz * dHy_dz
-        self._psi_Ey_x = self._bx * self._psi_Ey_x + self._cx * dHz_dx
-        self._psi_Ey_z = self._bz * self._psi_Ey_z + self._cz * dHx_dz
-        self._psi_Ez_x = self._bx * self._psi_Ez_x + self._cx * dHy_dx
-        self._psi_Ez_y = self._by * self._psi_Ez_y + self._cy * dHx_dy
+        self._psi_Ex_y = self._by_e * self._psi_Ex_y + self._cy_e * dHz_dy
+        self._psi_Ex_z = self._bz_e * self._psi_Ex_z + self._cz_e * dHy_dz
+        self._psi_Ey_x = self._bx_e * self._psi_Ey_x + self._cx_e * dHz_dx
+        self._psi_Ey_z = self._bz_e * self._psi_Ey_z + self._cz_e * dHx_dz
+        self._psi_Ez_x = self._bx_e * self._psi_Ez_x + self._cx_e * dHy_dx
+        self._psi_Ez_y = self._by_e * self._psi_Ez_y + self._cy_e * dHx_dy
 
         self.Ex += self._ce_x * (
-            dHz_dy / (self._ky * self.dl)
+            dHz_dy / (self._ky_e * self.dl)
             + self._psi_Ex_y
-            - dHy_dz / (self._kz * self.dl)
+            - dHy_dz / (self._kz_e * self.dl)
             - self._psi_Ex_z
         )
         self.Ey += self._ce_y * (
-            dHx_dz / (self._kz * self.dl)
+            dHx_dz / (self._kz_e * self.dl)
             + self._psi_Ey_z
-            - dHz_dx / (self._kx * self.dl)
+            - dHz_dx / (self._kx_e * self.dl)
             - self._psi_Ey_x
         )
         self.Ez += self._ce_z * (
-            dHy_dx / (self._kx * self.dl)
+            dHy_dx / (self._kx_e * self.dl)
             + self._psi_Ez_x
-            - dHx_dy / (self._ky * self.dl)
+            - dHx_dy / (self._ky_e * self.dl)
             - self._psi_Ez_y
         )
 

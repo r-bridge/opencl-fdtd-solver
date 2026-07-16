@@ -119,5 +119,68 @@ class TestAnalyticDispersion(unittest.TestCase):
         )
 
 
+class TestPmlReflection(unittest.TestCase):
+    """Quantified CPML reflection via short vs extended reference domains."""
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ.setdefault("PYOPENCL_CTX", "0")
+
+    @staticmethod
+    def _probe_trace(*, nz: int, npml: int, z_src: int, z_probe: int, n_steps: int) -> np.ndarray:
+        nx = ny = 16
+        dl = 1e-3
+        fdtd = OpenCLFDTD((nx, ny, nz), dl, npml=npml)
+        t0 = 35.0 * fdtd.dt
+        sigma = 6.0 * fdtd.dt
+        i0, i1 = nx // 2 - 1, nx // 2 + 2
+        j0, j1 = ny // 2 - 1, ny // 2 + 2
+
+        def src(f):
+            amp = -((f.t - t0) / sigma) * np.exp(-0.5 * ((f.t - t0) / sigma) ** 2)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                f.add_source_Ex(z_src, float(amp), i0=i0, i1=i1, j0=j0, j1=j1)
+
+        fdtd.add_source(src)
+        probe = np.zeros(n_steps, dtype=np.float64)
+        ix = iy = nx // 2
+        for n in range(n_steps):
+            if n == 90:
+                fdtd.clear_sources()
+            fdtd.step()
+            probe[n] = float(fdtd.Ex[ix, iy, z_probe])
+        return probe
+
+    def test_normal_incidence_reflection_below_minus_25db(self):
+        """Short domain (PML near probe) minus long reference ≈ reflected field.
+
+        Pre-#49 CPML (weak σ, κ≡1, no stagger) measured ~−4 dB on this setup.
+        """
+        npml = 12
+        z_src = 36
+        z_probe = 70
+        n_steps = 360
+        nz_short = z_probe + 8 + npml
+        nz_long = z_probe + 100 + npml
+        p_short = self._probe_trace(
+            nz=nz_short, npml=npml, z_src=z_src, z_probe=z_probe, n_steps=n_steps
+        )
+        p_long = self._probe_trace(
+            nz=nz_long, npml=npml, z_src=z_src, z_probe=z_probe, n_steps=n_steps
+        )
+        i_inc = int(np.argmax(np.abs(p_long)))
+        e_inc = float(np.max(np.abs(p_long)))
+        self.assertGreater(e_inc, 1e-8)
+        e_ref = float(np.max(np.abs((p_short - p_long)[i_inc + 20 :])))
+        r = e_ref / e_inc
+        r_db = 20.0 * np.log10(max(r, 1e-30))
+        self.assertLess(
+            r_db,
+            -25.0,
+            f"CPML |R|={r:.3e} ({r_db:.1f} dB); expected < -25 dB",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -10,9 +10,9 @@
       ],
       "max_main_lobe_db": 2.5,
       "metrics": {
-        "main_lobe_max_abs_db_error": 0.46229967,
+        "main_lobe_max_abs_db_error": 0.60818969,
         "meep_null_ratio": 1.8117464e-05,
-        "opencl_null_ratio": 0.027637866
+        "opencl_null_ratio": 0.02331588
       },
       "n_angles": 19,
       "n_steps": 500,
@@ -36,9 +36,9 @@
       ],
       "max_main_lobe_db": 3.0,
       "metrics": {
-        "main_lobe_max_abs_db_error": 0.62530857,
+        "main_lobe_max_abs_db_error": 0.8349296,
         "meep_null_ratio": 1.8161653e-05,
-        "opencl_null_ratio": 0.02438465
+        "opencl_null_ratio": 0.025347183
       },
       "n_angles": 19,
       "n_steps": 500,
