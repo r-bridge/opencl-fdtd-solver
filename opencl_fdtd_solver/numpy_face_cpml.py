@@ -47,4 +47,3 @@ class NumPyFDTD_FaceCPML(NumPyFDTD):
 
     # The step(), run(), and API remain identical; updates are delegated.
     # Implementation will be filled in in a follow-up change.
-
