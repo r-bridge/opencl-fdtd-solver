@@ -104,10 +104,10 @@ class TestOpenCLEngineBasics(unittest.TestCase):
         expected_dt = 0.99 * 1e-3 / (299_792_458.0 * np.sqrt(3.0))
         self.assertAlmostEqual(fdtd.dt, expected_dt, places=16)
 
-        buf = io.StringIO()
-        with redirect_stdout(buf):
+        # Progress logs at INFO
+        with self.assertLogs("opencl_fdtd_solver.engine", level="INFO") as cm:
             fdtd.run(3, progress_every=1)
-        out = buf.getvalue()
+        out = "\n".join(cm.output)
         self.assertIn("step 0/3", out)
         self.assertEqual(fdtd.step_num, 3)
 

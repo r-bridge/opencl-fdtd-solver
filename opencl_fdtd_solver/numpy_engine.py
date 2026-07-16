@@ -28,11 +28,14 @@ class NumPyFDTD(SourceMonitorMixin):
     Acts as a reference implementation and fallback when OpenCL is unavailable.
     """
 
-    def __init__(self, shape, dl, npml=20, dtype=np.float32):
+    def __init__(self, shape, dl, npml=20, dtype=np.float32, psi_dtype: np.dtype | None = None):
         self.Nx, self.Ny, self.Nz = shape
         self.dl = float(dl)
         self.npml = int(npml)
         self.dtype = dtype
+        # Allow overriding CPML auxiliary-field dtype to reduce memory (e.g., np.float16).
+        # Defaults to main computation dtype to preserve numerical parity.
+        self.psi_dtype = self.dtype if psi_dtype is None else np.dtype(psi_dtype)
         self.t = 0.0
         self.step_num = 0
 
@@ -179,19 +182,20 @@ class NumPyFDTD(SourceMonitorMixin):
         self._kz = kz.reshape(1, 1, Nz)
 
         # CPML auxiliary variables
-        self._psi_Hx_y = np.zeros((Nx, Ny, Nz), dtype=self.dtype)
-        self._psi_Hx_z = np.zeros((Nx, Ny, Nz), dtype=self.dtype)
-        self._psi_Hy_x = np.zeros((Nx, Ny, Nz), dtype=self.dtype)
-        self._psi_Hy_z = np.zeros((Nx, Ny, Nz), dtype=self.dtype)
-        self._psi_Hz_x = np.zeros((Nx, Ny, Nz), dtype=self.dtype)
-        self._psi_Hz_y = np.zeros((Nx, Ny, Nz), dtype=self.dtype)
+        dt_aux = self.psi_dtype
+        self._psi_Hx_y = np.zeros((Nx, Ny, Nz), dtype=dt_aux)
+        self._psi_Hx_z = np.zeros((Nx, Ny, Nz), dtype=dt_aux)
+        self._psi_Hy_x = np.zeros((Nx, Ny, Nz), dtype=dt_aux)
+        self._psi_Hy_z = np.zeros((Nx, Ny, Nz), dtype=dt_aux)
+        self._psi_Hz_x = np.zeros((Nx, Ny, Nz), dtype=dt_aux)
+        self._psi_Hz_y = np.zeros((Nx, Ny, Nz), dtype=dt_aux)
 
-        self._psi_Ex_y = np.zeros((Nx, Ny, Nz), dtype=self.dtype)
-        self._psi_Ex_z = np.zeros((Nx, Ny, Nz), dtype=self.dtype)
-        self._psi_Ey_x = np.zeros((Nx, Ny, Nz), dtype=self.dtype)
-        self._psi_Ey_z = np.zeros((Nx, Ny, Nz), dtype=self.dtype)
-        self._psi_Ez_x = np.zeros((Nx, Ny, Nz), dtype=self.dtype)
-        self._psi_Ez_y = np.zeros((Nx, Ny, Nz), dtype=self.dtype)
+        self._psi_Ex_y = np.zeros((Nx, Ny, Nz), dtype=dt_aux)
+        self._psi_Ex_z = np.zeros((Nx, Ny, Nz), dtype=dt_aux)
+        self._psi_Ey_x = np.zeros((Nx, Ny, Nz), dtype=dt_aux)
+        self._psi_Ey_z = np.zeros((Nx, Ny, Nz), dtype=dt_aux)
+        self._psi_Ez_x = np.zeros((Nx, Ny, Nz), dtype=dt_aux)
+        self._psi_Ez_y = np.zeros((Nx, Ny, Nz), dtype=dt_aux)
 
     def _fwd(self, F, axis):
         d = np.zeros_like(F)
