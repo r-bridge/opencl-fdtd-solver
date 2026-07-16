@@ -19,7 +19,13 @@
 import unittest
 
 import numpy as np
-from opencl_fdtd_solver import NumPyFDTD, NumPyNear2FarMonitor, OpenCLFDTD, OpenCLNear2FarMonitor
+from opencl_fdtd_solver import (
+    NumPyFDTD,
+    NumPyFDTD_FaceCPML,
+    NumPyNear2FarMonitor,
+    OpenCLFDTD,
+    OpenCLNear2FarMonitor,
+)
 
 
 class TestGenericFDTDSolver(unittest.TestCase):
@@ -77,6 +83,32 @@ class TestGenericFDTDSolver(unittest.TestCase):
             self.assertGreater(np.max(np.abs(np_field)), 0.0, f"NumPy field {field} is zero!")
             # Precision tolerance
             self.assertLess(diff, 1e-4, f"Field mismatch in {field}: {diff:.6e}")
+
+    def test_face_cpml_numpy_vs_opencl_engine_fields(self):
+        """Face-local NumPy CPML must match OpenCL within the same field tolerance."""
+        np_sim = NumPyFDTD_FaceCPML(self.shape, self.dl, npml=self.npml)
+        cl_sim = OpenCLFDTD(self.shape, self.dl, npml=self.npml)
+        np_sim.set_epsilon(self.eps)
+        cl_sim.set_epsilon(self.eps)
+        z_src = self.shape[2] - self.npml - 2
+
+        def np_source(f):
+            f.Ex[:, :, z_src] += np.sin(2 * np.pi * self.freq * f.t)
+
+        def cl_source(f):
+            f.add_source_Ex(z_src, np.sin(2 * np.pi * self.freq * f.t))
+
+        np_sim.add_source(np_source)
+        cl_sim.add_source(cl_source)
+        for _ in range(50):
+            np_sim.step()
+            cl_sim.step()
+        for field in ["Ex", "Ey", "Ez", "Hx", "Hy", "Hz"]:
+            np_field = getattr(np_sim, field)
+            cl_field = getattr(cl_sim, field)
+            diff = np.max(np.abs(np_field - cl_field))
+            self.assertGreater(np.max(np.abs(np_field)), 0.0, f"NumPy field {field} is zero!")
+            self.assertLess(diff, 1e-4, f"Face-CPML mismatch in {field}: {diff:.6e}")
 
     def test_opencl_monitors(self):
         """GPU face-DFT + far-field should match host Near2FarBase on face interiors."""
