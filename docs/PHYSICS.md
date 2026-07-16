@@ -236,8 +236,10 @@ Three independent layers. You do not need to read the OpenCL code to interpret t
 Implemented in `tests/test_analytic_validation.py`:
 
 - Yee dispersion relation (plane-wave phase).
-- Far-field angular shape for a compact \(E_x\) source \(\sim\cos^2\theta\) in the XZ cut.
+- Far-field angular shape for a compact \(E_x\) source \(\sim\cos^2\theta\) in the XZ cut, plus a strict endfire null-depth gate.
 - CPML normal-incidence reflection bound (\(\lesssim -25\,\mathrm{dB}\)).
+- Closed-box (npml=0) electromagnetic energy stability after the source is off.
+- Dielectric-sphere bistatic E-plane shape vs Bohren–Huffman Mie series (`tests/analytic_mie.py`; normalized pattern correlation, not absolute RCS).
 
 ### 10.2 OpenCL ↔ NumPy parity
 
@@ -317,5 +319,5 @@ Prefer Meep or a commercial code if you need any of:
 | `opencl_fdtd_solver/kernels/sources.cl` | Soft Ex / Jx |
 | `opencl_fdtd_solver/kernels/dft_farfield.cl` | Face DFT + far-field reduce |
 | `opencl_fdtd_solver/monitors.py` | Host near-to-far (readable twin of the kernels) |
-| `tests/test_analytic_validation.py` | Dispersion, dipole pattern, PML \|R\| |
+| `tests/test_analytic_validation.py` | Dispersion, dipole pattern/null, PML \|R\|, energy, Mie shape |
 | `tests/meep_validation/baselines/` | Committed Meep discrepancy reports |

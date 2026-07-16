@@ -20,6 +20,7 @@ setup(
             "matplotlib",
             "pillow",
             "coverage",
+            "scipy",
         ],
         "lint": [
             "ruff>=0.8",
