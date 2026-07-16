@@ -281,7 +281,10 @@ class OpenCLFDTD(SourceMonitorMixin):
         # touch contiguous addresses along the fastest array axis (k).
         # Kernel sources live in opencl_fdtd_solver/kernels/*.cl
         kernel_src = load_kernel_source()
-        self.program = cl.Program(self.ctx, kernel_src).build()
+        # -cl-mad-enable: allow a*b+c fusion into mad/fma. Kept conservative;
+        # -cl-fast-relaxed-math is avoided so POCL-generated golden baselines
+        # and far-field null floors stay reproducible.
+        self.program = cl.Program(self.ctx, kernel_src).build(options=["-cl-mad-enable"])
         self.kern_update_H_interior = cl.Kernel(self.program, "update_H_interior")
         self.kern_update_H_pml = cl.Kernel(self.program, "update_H_pml")
         self.kern_update_E_interior = cl.Kernel(self.program, "update_E_interior")
