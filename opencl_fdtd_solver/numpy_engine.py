@@ -59,6 +59,81 @@ class NumPyFDTD:
         assert eps_array.shape == (self.Nx, self.Ny, self.Nz)
         self.eps_r = eps_array.astype(self.dtype)
 
+    def add_source_Ex(self, z_src, amp, i0=None, i1=None, j0=None, j1=None):
+        """Soft-add a sheet amplitude directly onto ``Ex`` (legacy field inject).
+
+        Prefer :meth:`add_source_Jx` when matching Meep current-density sources.
+
+        Optional half-open index ranges ``[i0, i1)`` / ``[j0, j1)`` limit the
+        sheet (default: full XY, including PML). Use interior-only bounds when
+        matching Meep sources that stop at the PML.
+        """
+        i0_i = 0 if i0 is None else int(i0)
+        i1_i = self.Nx if i1 is None else int(i1)
+        j0_i = 0 if j0 is None else int(j0)
+        j1_i = self.Ny if j1 is None else int(j1)
+        z = int(z_src)
+        self.Ex[i0_i:i1_i, j0_i:j1_i, z] += self.dtype(amp)
+
+    def add_source_Jx(
+        self,
+        z_src,
+        Jx,
+        i0=None,
+        i1=None,
+        j0=None,
+        j1=None,
+        *,
+        rim_taper=False,
+        rim_edge=0.8,
+        rim_renorm=True,
+    ):
+        """Inject SI current density ``Jx`` (A/m²) on a constant-z Ex sheet.
+
+        Applies ``Ex += -dt/(ε₀ εᵣ) Jx`` using the host ε array, matching
+        Meep's ``D -= J·dt`` then ``E = χ⁻¹ D`` (with SI ε₀ restored) and the
+        OpenCL kernel of the same name.
+
+        Optional half-open ``[i0, i1)`` / ``[j0, j1)`` sheet bounds (default: full XY).
+
+        If ``rim_taper`` is true, multiplies by sheet rim weights (edges ×
+        ``rim_edge``, corners × ``rim_edge²``). Default ``rim_edge=0.8`` was
+        tuned against Meep continuous volume-source restriction on the mid-plane
+        cases. With ``rim_renorm`` (default true), ``Jx`` is scaled so ∑weights
+        equals the hard cell count (preserves net ∫J).
+        """
+        i0_i = 0 if i0 is None else int(i0)
+        i1_i = self.Nx if i1 is None else int(i1)
+        j0_i = 0 if j0 is None else int(j0)
+        j1_i = self.Ny if j1 is None else int(j1)
+        z = int(z_src)
+        jx = float(Jx)
+        re = float(rim_edge)
+        if rim_taper and rim_renorm:
+            nx_s = max(0, i1_i - i0_i)
+            ny_s = max(0, j1_i - j0_i)
+            if nx_s >= 2 and ny_s >= 2:
+                ni, nj = nx_s - 2, ny_s - 2
+                wsum = ni * nj + re * (2 * ni + 2 * nj) + (re * re) * 4
+                jx *= (nx_s * ny_s) / wsum
+
+        sl_i = slice(i0_i, i1_i)
+        sl_j = slice(j0_i, j1_i)
+        soft = -(self.dt / (EPS0 * self.eps_r[sl_i, sl_j, z])) * jx
+        if rim_taper:
+            nx_s = max(0, i1_i - i0_i)
+            ny_s = max(0, j1_i - j0_i)
+            w = np.ones((nx_s, ny_s), dtype=self.dtype)
+            # Match OpenCL: both lo/hi edge checks fire on a 1-cell span (×rim²).
+            if nx_s >= 1:
+                w[0, :] *= re
+                w[-1, :] *= re
+            if ny_s >= 1:
+                w[:, 0] *= re
+                w[:, -1] *= re
+            soft = soft * w
+        self.Ex[sl_i, sl_j, z] += soft.astype(self.dtype, copy=False)
+
     def _build_cpml(self):
         dl = self.dl
         dt = self.dt
