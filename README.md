@@ -71,6 +71,10 @@ mypy opencl_fdtd_solver
 
 Optional local hooks: `pip install pre-commit && pre-commit install`.
 
+### NumPy CPML storage
+- Default NumPy reference (`NumPyFDTD`) uses volume CPML with an option to reduce memory via `psi_dtype`.
+- An experimental `NumPyFDTD_FaceCPML` scaffolding mirrors the OpenCL face-local CPML layout and will be enabled after validation.
+
 ---
 
 ## 5. MEEP Correctness Comparison

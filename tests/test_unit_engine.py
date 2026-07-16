@@ -17,6 +17,7 @@ import numpy as np
 import pyopencl as cl
 from opencl_fdtd_solver import NumPyFDTD, OpenCLFDTD
 from opencl_fdtd_solver.kernels import KERNEL_FILES, load_kernel_source
+from opencl_fdtd_solver.numpy_face_cpml import NumPyFDTD_FaceCPML
 
 EXPECTED_KERNELS = (
     "update_H_interior",
@@ -40,6 +41,12 @@ class TestPackageMetadata(unittest.TestCase):
 
         self.assertEqual(opencl_fdtd_solver.__name__, "opencl_fdtd_solver")
         self.assertEqual(opencl_fdtd_solver.__version__, "1.0.0")
+
+    def test_face_cpml_scaffold_imports(self):
+        sim = NumPyFDTD_FaceCPML((8, 8, 8), 1e-3, npml=2)
+        self.assertEqual(getattr(sim, "CPML_STORAGE", ""), "face")
+        # Basic step should run (delegated to base for now)
+        sim.step()
 
 
 class TestKernelSources(unittest.TestCase):
