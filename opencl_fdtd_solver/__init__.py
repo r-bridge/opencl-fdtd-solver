@@ -1,5 +1,4 @@
 __version__ = "1.0.0"
-__name__ = "opencl_fdtd_solver"
 
 from .constants import C0, EPS0, ETA0, MU0
 from .engine import OpenCLFDTD
@@ -17,4 +16,5 @@ __all__ = [
     "NumPyNear2FarMonitor",
     "OpenCLNear2FarMonitor",
     "StepCallback",
+    "__version__",
 ]

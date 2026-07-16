@@ -34,6 +34,14 @@ EXPECTED_KERNELS = (
 )
 
 
+class TestPackageMetadata(unittest.TestCase):
+    def test_package_name_not_overwritten(self):
+        import opencl_fdtd_solver
+
+        self.assertEqual(opencl_fdtd_solver.__name__, "opencl_fdtd_solver")
+        self.assertEqual(opencl_fdtd_solver.__version__, "1.0.0")
+
+
 class TestKernelSources(unittest.TestCase):
     def test_packaged_cl_files_exist_and_list_kernels(self):
         src = load_kernel_source()
