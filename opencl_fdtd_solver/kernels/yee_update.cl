@@ -12,12 +12,12 @@ __kernel void update_H_interior(
     int Nx, int Ny, int Nz,
     int npml,
     float dl, float dtm,
-    __global const float *Ex,
-    __global const float *Ey,
-    __global const float *Ez,
-    __global float *Hx,
-    __global float *Hy,
-    __global float *Hz
+    __global const float * restrict Ex,
+    __global const float * restrict Ey,
+    __global const float * restrict Ez,
+    __global float * restrict Hx,
+    __global float * restrict Hy,
+    __global float * restrict Hz
 ) {
     int k = get_global_id(0) + npml;
     int j = get_global_id(1) + npml;
@@ -44,18 +44,18 @@ __kernel void update_H_pml(
     int Nx, int Ny, int Nz,
     int npml,
     float dl, float dtm,
-    __global const float *Ex,
-    __global const float *Ey,
-    __global const float *Ez,
-    __global float *Hx,
-    __global float *Hy,
-    __global float *Hz,
-    __global const float *bx, __global const float *cx, __global const float *kx,
-    __global const float *by, __global const float *cy, __global const float *ky,
-    __global const float *bz, __global const float *cz, __global const float *kz,
-    __global float *psi_Hx_y, __global float *psi_Hx_z,
-    __global float *psi_Hy_x, __global float *psi_Hy_z,
-    __global float *psi_Hz_x, __global float *psi_Hz_y
+    __global const float * restrict Ex,
+    __global const float * restrict Ey,
+    __global const float * restrict Ez,
+    __global float * restrict Hx,
+    __global float * restrict Hy,
+    __global float * restrict Hz,
+    __global const float * restrict bx, __global const float * restrict cx, __global const float * restrict kx,
+    __global const float * restrict by, __global const float * restrict cy, __global const float * restrict ky,
+    __global const float * restrict bz, __global const float * restrict cz, __global const float * restrict kz,
+    __global float * restrict psi_Hx_y, __global float * restrict psi_Hx_z,
+    __global float * restrict psi_Hy_x, __global float * restrict psi_Hy_z,
+    __global float * restrict psi_Hz_x, __global float * restrict psi_Hz_y
 ) {
     int k = get_global_id(0);
     int j = get_global_id(1);
@@ -122,13 +122,13 @@ __kernel void update_E_interior(
     int npml,
     float dl, float dt,
     float eps0,
-    __global const float *eps_r,
-    __global const float *Hx,
-    __global const float *Hy,
-    __global const float *Hz,
-    __global float *Ex,
-    __global float *Ey,
-    __global float *Ez
+    __global const float * restrict eps_r,
+    __global const float * restrict Hx,
+    __global const float * restrict Hy,
+    __global const float * restrict Hz,
+    __global float * restrict Ex,
+    __global float * restrict Ey,
+    __global float * restrict Ez
 ) {
     int k = get_global_id(0) + npml;
     int j = get_global_id(1) + npml;
@@ -157,19 +157,19 @@ __kernel void update_E_pml(
     int npml,
     float dl, float dt,
     float eps0,
-    __global const float *eps_r,
-    __global const float *Hx,
-    __global const float *Hy,
-    __global const float *Hz,
-    __global float *Ex,
-    __global float *Ey,
-    __global float *Ez,
-    __global const float *bx, __global const float *cx, __global const float *kx,
-    __global const float *by, __global const float *cy, __global const float *ky,
-    __global const float *bz, __global const float *cz, __global const float *kz,
-    __global float *psi_Ex_y, __global float *psi_Ex_z,
-    __global float *psi_Ey_x, __global float *psi_Ey_z,
-    __global float *psi_Ez_x, __global float *psi_Ez_y
+    __global const float * restrict eps_r,
+    __global const float * restrict Hx,
+    __global const float * restrict Hy,
+    __global const float * restrict Hz,
+    __global float * restrict Ex,
+    __global float * restrict Ey,
+    __global float * restrict Ez,
+    __global const float * restrict bx, __global const float * restrict cx, __global const float * restrict kx,
+    __global const float * restrict by, __global const float * restrict cy, __global const float * restrict ky,
+    __global const float * restrict bz, __global const float * restrict cz, __global const float * restrict kz,
+    __global float * restrict psi_Ex_y, __global float * restrict psi_Ex_z,
+    __global float * restrict psi_Ey_x, __global float * restrict psi_Ey_z,
+    __global float * restrict psi_Ez_x, __global float * restrict psi_Ez_y
 ) {
     int k = get_global_id(0);
     int j = get_global_id(1);
