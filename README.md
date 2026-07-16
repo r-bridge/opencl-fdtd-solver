@@ -2,6 +2,8 @@
 
 A lightweight, high-performance, generic 3D Yee-grid Finite-Difference Time-Domain (FDTD) electromagnetic solver written in Python and accelerated with PyOpenCL.
 
+**Validating the physics?** Start with [`docs/PHYSICS.md`](docs/PHYSICS.md) — formulation, assumptions, and Meep/analytic evidence written for physicists rather than programmers.
+
 ---
 
 ## 1. Licensing & Attribution
@@ -128,6 +130,8 @@ OpenCL ↔ NumPy field/monitor parity remains in `tests/test_solver.py` (always 
 ---
 
 ## 6. Accuracy for Practical Applications
+
+**Physics review (for non-programmers):** see [`docs/PHYSICS.md`](docs/PHYSICS.md) for the continuous equations, Yee/CPML discretization, sources, near-to-far formulas, assumptions, and how analytic + Meep evidence supports soundness.
 
 This package is a **2nd-order Yee + CPML kernel**. For nondispersive scalar-ε problems on a matched uniform grid (same Δx, Courant, and cell-wise materials), it is in the **same accuracy class as MEEP’s default FDTD**. MEEP is not inherently more accurate for that shared physics; the repo’s value proposition is GPU throughput, not higher-order fidelity.
 
