@@ -146,7 +146,7 @@ This package is a **2nd-order Yee + CPML kernel**. For nondispersive scalar-ε p
 
 **Evidence (MEEP-relative, abstract cases):** mid-plane Ex shape agrees at ~98% Pearson correlation with ~3% aligned residual energy; far-field main-lobe |S|(θ) differs by ~0.7 dB (vacuum) to ~2.8 dB (εᵣ=4 sphere) under the CI masks. Those baselines use hard voxel materials (`eps_averaging=False` on the MEEP side) and do not certify a specific device design.
 
-**When MEEP (or another full-featured solver) is usually ahead in practice:** dispersive / lossy / magnetic media, PEC/periodic/symmetry BCs, double precision, or any workflow that relies on a built-in geometry stack you do not provide yourself.
+**When MEEP (or another full-featured solver) is usually ahead in practice:** dispersive / lossy / magnetic media, PEC/periodic/symmetry BCs, or any workflow that relies on a built-in geometry stack you do not provide yourself. (This solver supports OpenCL FP64 via `dtype=np.float64` when the device allows it — see [`docs/API.md`](docs/API.md).)
 
 **Subpixel averaging is intentionally out of scope.** The solver only accepts a cell-wise scalar εᵣ via `set_epsilon`; geometry sampling and effective-medium construction belong in the application layer. Typical choices include ~4³ subvoxels per Yee cell. At least two approaches fit this design:
 

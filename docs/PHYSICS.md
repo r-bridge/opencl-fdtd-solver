@@ -2,6 +2,8 @@
 
 This document is for physicists reviewing whether the solver’s electromagnetics are sound. It describes the equations that are discretized, the assumptions that bound the model, and the independent checks used to validate correctness. Implementation detail is mentioned only when it affects the physics.
 
+For the public Python API (constructors, sources, monitors), see [`API.md`](API.md).
+
 ---
 
 ## 1. What this solver is
