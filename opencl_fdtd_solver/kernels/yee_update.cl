@@ -11,13 +11,13 @@
 __kernel void update_H_interior(
     int Nx, int Ny, int Nz,
     int npml,
-    float dtm_dl,  /* dt / (mu0 * dl), folded on host */
-    __global const float * restrict Ex,
-    __global const float * restrict Ey,
-    __global const float * restrict Ez,
-    __global float * restrict Hx,
-    __global float * restrict Hy,
-    __global float * restrict Hz
+    real dtm_dl,  /* dt / (mu0 * dl), folded on host */
+    __global const real * restrict Ex,
+    __global const real * restrict Ey,
+    __global const real * restrict Ez,
+    __global real * restrict Hx,
+    __global real * restrict Hy,
+    __global real * restrict Hz
 ) {
     int k = get_global_id(0) + npml;
     int j = get_global_id(1) + npml;
@@ -27,12 +27,12 @@ __kernel void update_H_interior(
 
     int idx = i * Ny * Nz + j * Nz + k;
 
-    float dEz_dy = Ez[idx + Nz] - Ez[idx];
-    float dEy_dz = Ey[idx + 1] - Ey[idx];
-    float dEx_dz = Ex[idx + 1] - Ex[idx];
-    float dEz_dx = Ez[idx + Ny * Nz] - Ez[idx];
-    float dEy_dx = Ey[idx + Ny * Nz] - Ey[idx];
-    float dEx_dy = Ex[idx + Nz] - Ex[idx];
+    real dEz_dy = Ez[idx + Nz] - Ez[idx];
+    real dEy_dz = Ey[idx + 1] - Ey[idx];
+    real dEx_dz = Ex[idx + 1] - Ex[idx];
+    real dEz_dx = Ez[idx + Ny * Nz] - Ez[idx];
+    real dEy_dx = Ey[idx + Ny * Nz] - Ey[idx];
+    real dEx_dy = Ex[idx + Nz] - Ex[idx];
 
     Hx[idx] -= dtm_dl * (dEz_dy - dEy_dz);
     Hy[idx] -= dtm_dl * (dEx_dz - dEz_dx);
@@ -42,20 +42,20 @@ __kernel void update_H_interior(
 __kernel void update_H_pml(
     int Nx, int Ny, int Nz,
     int npml,
-    float dtm,
-    __global const float * restrict Ex,
-    __global const float * restrict Ey,
-    __global const float * restrict Ez,
-    __global float * restrict Hx,
-    __global float * restrict Hy,
-    __global float * restrict Hz,
+    real dtm,
+    __global const real * restrict Ex,
+    __global const real * restrict Ey,
+    __global const real * restrict Ez,
+    __global real * restrict Hx,
+    __global real * restrict Hy,
+    __global real * restrict Hz,
     /* ikx/iky/ikz hold 1/(kappa * dl), precomputed on host */
-    __global const float * restrict bx, __global const float * restrict cx, __global const float * restrict ikx,
-    __global const float * restrict by, __global const float * restrict cy, __global const float * restrict iky,
-    __global const float * restrict bz, __global const float * restrict cz, __global const float * restrict ikz,
-    __global float * restrict psi_Hx_y, __global float * restrict psi_Hx_z,
-    __global float * restrict psi_Hy_x, __global float * restrict psi_Hy_z,
-    __global float * restrict psi_Hz_x, __global float * restrict psi_Hz_y
+    __global const real * restrict bx, __global const real * restrict cx, __global const real * restrict ikx,
+    __global const real * restrict by, __global const real * restrict cy, __global const real * restrict iky,
+    __global const real * restrict bz, __global const real * restrict cz, __global const real * restrict ikz,
+    __global real * restrict psi_Hx_y, __global real * restrict psi_Hx_z,
+    __global real * restrict psi_Hy_x, __global real * restrict psi_Hy_z,
+    __global real * restrict psi_Hz_x, __global real * restrict psi_Hz_y
 ) {
     int k = get_global_id(0);
     int j = get_global_id(1);
@@ -72,20 +72,20 @@ __kernel void update_H_pml(
 
     int idx = i * Ny * Nz + j * Nz + k;
 
-    float dEz_dy = (j < Ny - 1) ? (Ez[idx + Nz] - Ez[idx]) : 0.0f;
-    float dEy_dz = (k < Nz - 1) ? (Ey[idx + 1] - Ey[idx])  : 0.0f;
-    float dEx_dz = (k < Nz - 1) ? (Ex[idx + 1] - Ex[idx])  : 0.0f;
-    float dEz_dx = (i < Nx - 1) ? (Ez[idx + Ny * Nz] - Ez[idx]) : 0.0f;
-    float dEy_dx = (i < Nx - 1) ? (Ey[idx + Ny * Nz] - Ey[idx]) : 0.0f;
-    float dEx_dy = (j < Ny - 1) ? (Ex[idx + Nz] - Ex[idx]) : 0.0f;
+    real dEz_dy = (j < Ny - 1) ? (Ez[idx + Nz] - Ez[idx]) : (real)0.0;
+    real dEy_dz = (k < Nz - 1) ? (Ey[idx + 1] - Ey[idx])  : (real)0.0;
+    real dEx_dz = (k < Nz - 1) ? (Ex[idx + 1] - Ex[idx])  : (real)0.0;
+    real dEz_dx = (i < Nx - 1) ? (Ez[idx + Ny * Nz] - Ez[idx]) : (real)0.0;
+    real dEy_dx = (i < Nx - 1) ? (Ey[idx + Ny * Nz] - Ey[idx]) : (real)0.0;
+    real dEx_dy = (j < Ny - 1) ? (Ex[idx + Nz] - Ex[idx]) : (real)0.0;
 
     int in_x = (i < npml) || (i >= Nx - npml);
     int in_y = (j < npml) || (j >= Ny - npml);
     int in_z = (k < npml) || (k >= Nz - npml);
 
-    float p_Hx_y = 0.0f, p_Hx_z = 0.0f;
-    float p_Hy_x = 0.0f, p_Hy_z = 0.0f;
-    float p_Hz_x = 0.0f, p_Hz_y = 0.0f;
+    real p_Hx_y = (real)0.0, p_Hx_z = (real)0.0;
+    real p_Hy_x = (real)0.0, p_Hy_z = (real)0.0;
+    real p_Hz_x = (real)0.0, p_Hz_y = (real)0.0;
 
     if (in_x) {
         int il = (i < npml) ? i : (npml + i - (Nx - npml));
@@ -120,16 +120,16 @@ __kernel void update_H_pml(
 __kernel void update_E_interior(
     int Nx, int Ny, int Nz,
     int npml,
-    float inv_dl,
-    __global const float * restrict ce_x,  /* dt/(eps0*eps_r) at Ex edges */
-    __global const float * restrict ce_y,
-    __global const float * restrict ce_z,
-    __global const float * restrict Hx,
-    __global const float * restrict Hy,
-    __global const float * restrict Hz,
-    __global float * restrict Ex,
-    __global float * restrict Ey,
-    __global float * restrict Ez
+    real inv_dl,
+    __global const real * restrict ce_x,  /* dt/(eps0*eps_r) at Ex edges */
+    __global const real * restrict ce_y,
+    __global const real * restrict ce_z,
+    __global const real * restrict Hx,
+    __global const real * restrict Hy,
+    __global const real * restrict Hz,
+    __global real * restrict Ex,
+    __global real * restrict Ey,
+    __global real * restrict Ez
 ) {
     int k = get_global_id(0) + npml;
     int j = get_global_id(1) + npml;
@@ -139,12 +139,12 @@ __kernel void update_E_interior(
 
     int idx = i * Ny * Nz + j * Nz + k;
 
-    float dHz_dy = Hz[idx] - Hz[idx - Nz];
-    float dHy_dz = Hy[idx] - Hy[idx - 1];
-    float dHx_dz = Hx[idx] - Hx[idx - 1];
-    float dHz_dx = Hz[idx] - Hz[idx - Ny * Nz];
-    float dHy_dx = Hy[idx] - Hy[idx - Ny * Nz];
-    float dHx_dy = Hx[idx] - Hx[idx - Nz];
+    real dHz_dy = Hz[idx] - Hz[idx - Nz];
+    real dHy_dz = Hy[idx] - Hy[idx - 1];
+    real dHx_dz = Hx[idx] - Hx[idx - 1];
+    real dHz_dx = Hz[idx] - Hz[idx - Ny * Nz];
+    real dHy_dx = Hy[idx] - Hy[idx - Ny * Nz];
+    real dHx_dy = Hx[idx] - Hx[idx - Nz];
 
     Ex[idx] += ce_x[idx] * inv_dl * (dHz_dy - dHy_dz);
     Ey[idx] += ce_y[idx] * inv_dl * (dHx_dz - dHz_dx);
@@ -154,22 +154,22 @@ __kernel void update_E_interior(
 __kernel void update_E_pml(
     int Nx, int Ny, int Nz,
     int npml,
-    __global const float * restrict ce_x,  /* dt/(eps0*eps_r) at Ex edges */
-    __global const float * restrict ce_y,
-    __global const float * restrict ce_z,
-    __global const float * restrict Hx,
-    __global const float * restrict Hy,
-    __global const float * restrict Hz,
-    __global float * restrict Ex,
-    __global float * restrict Ey,
-    __global float * restrict Ez,
+    __global const real * restrict ce_x,  /* dt/(eps0*eps_r) at Ex edges */
+    __global const real * restrict ce_y,
+    __global const real * restrict ce_z,
+    __global const real * restrict Hx,
+    __global const real * restrict Hy,
+    __global const real * restrict Hz,
+    __global real * restrict Ex,
+    __global real * restrict Ey,
+    __global real * restrict Ez,
     /* ikx/iky/ikz hold 1/(kappa * dl), precomputed on host */
-    __global const float * restrict bx, __global const float * restrict cx, __global const float * restrict ikx,
-    __global const float * restrict by, __global const float * restrict cy, __global const float * restrict iky,
-    __global const float * restrict bz, __global const float * restrict cz, __global const float * restrict ikz,
-    __global float * restrict psi_Ex_y, __global float * restrict psi_Ex_z,
-    __global float * restrict psi_Ey_x, __global float * restrict psi_Ey_z,
-    __global float * restrict psi_Ez_x, __global float * restrict psi_Ez_y
+    __global const real * restrict bx, __global const real * restrict cx, __global const real * restrict ikx,
+    __global const real * restrict by, __global const real * restrict cy, __global const real * restrict iky,
+    __global const real * restrict bz, __global const real * restrict cz, __global const real * restrict ikz,
+    __global real * restrict psi_Ex_y, __global real * restrict psi_Ex_z,
+    __global real * restrict psi_Ey_x, __global real * restrict psi_Ey_z,
+    __global real * restrict psi_Ez_x, __global real * restrict psi_Ez_y
 ) {
     int k = get_global_id(0);
     int j = get_global_id(1);
@@ -186,20 +186,20 @@ __kernel void update_E_pml(
 
     int idx = i * Ny * Nz + j * Nz + k;
 
-    float dHz_dy = (j > 0) ? (Hz[idx] - Hz[idx - Nz]) : 0.0f;
-    float dHy_dz = (k > 0) ? (Hy[idx] - Hy[idx - 1])  : 0.0f;
-    float dHx_dz = (k > 0) ? (Hx[idx] - Hx[idx - 1])  : 0.0f;
-    float dHz_dx = (i > 0) ? (Hz[idx] - Hz[idx - Ny * Nz]) : 0.0f;
-    float dHy_dx = (i > 0) ? (Hy[idx] - Hy[idx - Ny * Nz]) : 0.0f;
-    float dHx_dy = (j > 0) ? (Hx[idx] - Hx[idx - Nz]) : 0.0f;
+    real dHz_dy = (j > 0) ? (Hz[idx] - Hz[idx - Nz]) : (real)0.0;
+    real dHy_dz = (k > 0) ? (Hy[idx] - Hy[idx - 1])  : (real)0.0;
+    real dHx_dz = (k > 0) ? (Hx[idx] - Hx[idx - 1])  : (real)0.0;
+    real dHz_dx = (i > 0) ? (Hz[idx] - Hz[idx - Ny * Nz]) : (real)0.0;
+    real dHy_dx = (i > 0) ? (Hy[idx] - Hy[idx - Ny * Nz]) : (real)0.0;
+    real dHx_dy = (j > 0) ? (Hx[idx] - Hx[idx - Nz]) : (real)0.0;
 
     int in_x = (i < npml) || (i >= Nx - npml);
     int in_y = (j < npml) || (j >= Ny - npml);
     int in_z = (k < npml) || (k >= Nz - npml);
 
-    float p_Ex_y = 0.0f, p_Ex_z = 0.0f;
-    float p_Ey_x = 0.0f, p_Ey_z = 0.0f;
-    float p_Ez_x = 0.0f, p_Ez_y = 0.0f;
+    real p_Ex_y = (real)0.0, p_Ex_z = (real)0.0;
+    real p_Ey_x = (real)0.0, p_Ey_z = (real)0.0;
+    real p_Ez_x = (real)0.0, p_Ez_y = (real)0.0;
 
     if (in_x) {
         int il = (i < npml) ? i : (npml + i - (Nx - npml));

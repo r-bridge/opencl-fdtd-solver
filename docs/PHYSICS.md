@@ -17,7 +17,7 @@ It is intentionally a **kernel**, not a full CAD/EM suite:
 | Vacuum μ = μ₀ | Magnetic materials (μᵣ ≠ 1) |
 | Soft Ex / SI Jx sheet sources | Built-in antennas, PEC/PMC, periodic BCs |
 | Closed-box Huygens near-to-far | Full geometric optics / high-frequency asymptotics |
-| Single-precision (float32) GPU path | Double-precision OpenCL path |
+| OpenCL FP32 (default) and FP64 (`dtype=float64`) | Separate CUDA backend / second kernel dialect |
 
 For the supported physics on a matched grid, the accuracy class is that of **default Meep FDTD** (same order, same leapfrog). Throughput is the design goal, not higher-order fidelity.
 
@@ -217,13 +217,13 @@ Pattern plots use complex Poynting magnitude; dB is \(20\log_{10}|S|\) after pea
 
 ## 9. Floating-point precision
 
-The OpenCL path is **float32 only**. Consequences:
+The default OpenCL path is **float32**. Optional **`dtype=np.float64`** rebuilds the same kernels with `real=double` when the device exposes `cl_khr_fp64` (and `cl_khr_int64_base_atomics` for near-to-far). There is no parallel CUDA dialect — FP64 is the same OpenCL sources.
 
-- Dynamic range and late-time cancellation are weaker than double-precision Meep.
-- Absolute amplitudes can disagree by ~10–20% while **shapes** remain highly correlated after LMS scaling (see baselines below).
-- DFT / far-field host reductions may use higher precision, but the time-stepping kernel does not.
+Consequences:
 
-If your physics needs long-time coherent accumulation or very deep nulls, treat float32 as a first-order limitation.
+- FP32: dynamic range and late-time cancellation are weaker than double-precision Meep; absolute amplitudes can disagree by ~10–20% while **shapes** remain highly correlated after LMS scaling (see baselines below).
+- FP64: expect roughly **~2×** slower wall time on bandwidth-bound grids (bytes/cell double); use it for long coherent runs or deep nulls when the device supports it.
+- Device without FP64 extensions: constructing `OpenCLFDTD(..., dtype=float64)` fails clearly.
 
 ---
 
@@ -274,7 +274,7 @@ These baselines certify **agreement of the shared FDTD physics**, not a particul
 
 Use this when deciding whether results are trustworthy for your problem.
 
-1. **Is my problem inside the model?** Scalar nondispersive ε, μ=μ₀, no PEC/periodic BCs, uniform Δℓ, float32 OK?
+1. **Is my problem inside the model?** Scalar nondispersive ε, μ=μ₀, no PEC/periodic BCs, uniform Δℓ; FP32 enough or need `dtype=float64`?
 2. **Resolution:** \(\Delta\ell\) small enough for the shortest wavelength *inside* the highest ε (rule of thumb: ≥10–20 cells/λ).
 3. **Courant:** leave at default \(0.99/\sqrt{3}\) unless you knowingly rematch any reference.
 4. **Materials:** supply a cell-wise εᵣ you trust (average subpixels yourself if needed).

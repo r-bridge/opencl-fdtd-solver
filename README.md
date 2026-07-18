@@ -16,6 +16,7 @@ The mathematical formulations for the Yee-grid field updates and the Convolution
 
 ## 2. Features
 *   **OpenCL Acceleration:** Runs field updates and DFT accumulations 100% on the GPU/accelerator using customized OpenCL kernels.
+*   **FP32 / FP64:** Same kernel sources; `OpenCLFDTD(..., dtype=np.float64)` when the device has `cl_khr_fp64` (expect ~2× cost from bandwidth). No separate CUDA engine.
 *   **Pluggable Monitors:** Supports host-side NumPy monitors and GPU-side OpenCL monitors for zero-copy DFT accumulation.
 *   **NumPy Fallback:** Includes a pure NumPy CPU reference implementation (`NumPyFDTD`) for testing, fallback, and benchmarking.
 *   **Cell-wise materials:** Nondispersive scalar εᵣ via `set_epsilon`. Subpixel averaging / geometry meshing is left to the caller (see §6).
@@ -24,7 +25,7 @@ The mathematical formulations for the Yee-grid field updates and the Convolution
 ---
 
 ## 3. Installation
-Ensure you have an OpenCL platform (NVIDIA CUDA, AMD, Intel, or POCL) installed, then:
+Ensure you have an OpenCL platform (NVIDIA, AMD, Intel, or POCL) installed, then:
 
 ```bash
 pip install -e .
@@ -32,7 +33,15 @@ pip install -e .
 pip install -e ".[test]"
 ```
 
-For GPU runs, point PyOpenCL at your GPU platform (often `0` for NVIDIA CUDA):
+FP64 example (device must advertise OpenCL double support):
+
+```python
+import numpy as np
+from opencl_fdtd_solver import OpenCLFDTD
+sim = OpenCLFDTD((200, 200, 200), 1e-3, npml=12, dtype=np.float64)
+```
+
+For GPU runs, point PyOpenCL at your GPU platform (often `0` for NVIDIA):
 
 ```bash
 # Linux / macOS

@@ -76,10 +76,15 @@ class TestKernelSources(unittest.TestCase):
     def test_packaged_cl_files_exist_and_list_kernels(self):
         src = load_kernel_source()
         self.assertEqual(KERNEL_FILES, ("yee_update.cl", "sources.cl", "dft_farfield.cl"))
+        self.assertIn("typedef float real", src)
+        self.assertIn("USE_FP64", src)
         for name in EXPECTED_KERNELS:
             self.assertIn(f"__kernel void {name}", src, name)
         # Macro line-continuations must be single backslashes (not Python-escaped).
         self.assertRegex(src, r"#define DFT_ACC\(CUR, PREV\) \\\n")
+        # Dual-precision kernels use real/real2 in signatures (not hardcoded float).
+        self.assertIn("__global const real * restrict Ex", src)
+        self.assertIn("__global real2 *", src)
 
     def test_opencl_program_builds(self):
         os.environ.setdefault("PYOPENCL_CTX", "0")
@@ -268,11 +273,34 @@ class TestOpenCLEngineBasics(unittest.TestCase):
         i, j, k = 6, 7, z
         self.assertAlmostEqual(fdtd.read_point("Ex", i, j, k), float(fdtd.Ex[i, j, k]))
 
-    def test_init_rejects_non_float32_dtype(self):
+    def test_init_rejects_unsupported_dtype(self):
         gpu = mock.Mock()
         gpu.name = "FakeGPU"
         gpu.type = cl.device_type.GPU
         gpu.global_mem_size = 8 * 1024**3
+        gpu.extensions = ""
+
+        fake_ctx = mock.Mock()
+        fake_ctx.devices = [gpu]
+        fake_queue = mock.Mock()
+
+        with self.assertRaises(ValueError) as cm:
+            OpenCLFDTD(
+                (8, 8, 8),
+                1e-3,
+                npml=1,
+                dtype=np.float16,
+                ctx=fake_ctx,
+                queue=fake_queue,
+            )
+        self.assertIn("float32 or float64", str(cm.exception).lower())
+
+    def test_init_fp64_requires_device_extensions(self):
+        gpu = mock.Mock()
+        gpu.name = "FakeGPU"
+        gpu.type = cl.device_type.GPU
+        gpu.global_mem_size = 8 * 1024**3
+        gpu.extensions = "cl_khr_fp64"  # missing int64 atomics
 
         fake_ctx = mock.Mock()
         fake_ctx.devices = [gpu]
@@ -287,7 +315,7 @@ class TestOpenCLEngineBasics(unittest.TestCase):
                 ctx=fake_ctx,
                 queue=fake_queue,
             )
-        self.assertIn("float32", str(cm.exception).lower())
+        self.assertIn("int64", str(cm.exception).lower())
 
 
 class TestNumPyEngine(unittest.TestCase):
@@ -308,6 +336,38 @@ class TestNumPyEngine(unittest.TestCase):
         for field in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
             diff = np.max(np.abs(getattr(np_sim, field) - getattr(cl_sim, field)))
             self.assertLess(diff, 2e-4, field)
+
+    def test_opencl_fp64_matches_numpy_fp64(self):
+        """OpenCL float64 path tracks NumPy float64 (needs device cl_khr_fp64)."""
+        os.environ.setdefault("PYOPENCL_CTX", "0")
+        import pyopencl as cl
+
+        ctx = cl.create_some_context(interactive=False)
+        device = ctx.devices[0]
+        if not OpenCLFDTD._device_supports_fp64(device):
+            self.skipTest(f"device {device.name!r} lacks OpenCL FP64")
+        if "cl_khr_int64_base_atomics" not in device.extensions:
+            self.skipTest(f"device {device.name!r} lacks int64 atomics")
+
+        shape = (24, 24, 24)
+        dl = 2e-3
+        npml = 4
+        freq = 4e9
+        np_sim = NumPyFDTD(shape, dl, npml=npml, dtype=np.float64)
+        cl_sim = OpenCLFDTD(shape, dl, npml=npml, dtype=np.float64)
+        z = shape[2] - npml - 2
+
+        def src(f):
+            f.add_source_Jx(z, np.sin(2 * np.pi * freq * f.t))
+
+        np_sim.add_source(src)
+        cl_sim.add_source(src)
+        for _ in range(40):
+            np_sim.step()
+            cl_sim.step()
+        for field in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
+            diff = float(np.max(np.abs(getattr(np_sim, field) - getattr(cl_sim, field))))
+            self.assertLess(diff, 1e-12, f"{field}: {diff:.3e}")
 
     def test_set_epsilon_shape_mismatch(self):
         sim = NumPyFDTD((10, 10, 10), 1e-3, npml=2)

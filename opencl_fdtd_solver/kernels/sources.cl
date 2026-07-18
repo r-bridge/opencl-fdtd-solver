@@ -6,9 +6,9 @@
 
 __kernel void add_source_Ex(
     int Nx, int Ny, int Nz,
-    int z_src, float amp,
+    int z_src, real amp,
     int i0, int i1, int j0, int j1,
-    __global float * restrict Ex
+    __global real * restrict Ex
 ) {
     int j = get_global_id(0);
     int i = get_global_id(1);
@@ -25,12 +25,12 @@ __kernel void add_source_Ex(
  * × rim_edge² (host may renorm J so ∑w equals the hard cell count). */
 __kernel void add_source_Jx(
     int Nx, int Ny, int Nz,
-    int z_src, float Jx,
+    int z_src, real Jx,
     int i0, int i1, int j0, int j1,
     int rim_taper,
-    float rim_edge,
-    __global const float * restrict ce_x,  /* dt/(eps0*eps_r) at Ex edges */
-    __global float * restrict Ex
+    real rim_edge,
+    __global const real * restrict ce_x,  /* dt/(eps0*eps_r) at Ex edges */
+    __global real * restrict Ex
 ) {
     int j = get_global_id(0);
     int i = get_global_id(1);
@@ -38,7 +38,7 @@ __kernel void add_source_Jx(
     if (i >= Nx || j >= Ny) return;
     if (i < i0 || i >= i1 || j < j0 || j >= j1) return;
 
-    float w = 1.0f;
+    real w = (real)1.0;
     if (rim_taper) {
         if (i == i0 || i == i1 - 1) w *= rim_edge;
         if (j == j0 || j == j1 - 1) w *= rim_edge;
