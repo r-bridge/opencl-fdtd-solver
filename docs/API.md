@@ -2,6 +2,8 @@
 
 Public surface of `opencl_fdtd_solver` (what `__all__` exports). Physics background: [`PHYSICS.md`](PHYSICS.md).
 
+**Maintenance:** keep this file consistent with the code. Agents and contributors must update it whenever `__all__` or public methods change; `tests/test_api_docs.py` (and `AGENTS.md`) enforce that.
+
 ```python
 from opencl_fdtd_solver import (
     C0, MU0, EPS0, ETA0,
@@ -73,7 +75,8 @@ OpenCLFDTD(shape, dl, npml=20, dtype=np.float32, ctx=None, queue=None)
 | `step()` | One Yee step (H → sources → E → monitors) |
 | `run(n_steps, progress_every=0)` | Loop `step` |
 | `read_point(name, i, j, k)` | Single cell without full-field download (`name` in `Ex`…`Hz`) |
-| `estimate_device_memory_bytes(shape, npml, dtype=…)` | Static GPU memory estimate |
+| `estimate_device_memory_bytes(shape, npml, dtype=…)` | Static GPU memory estimate (fields + face-local ψ) |
+| `device_memory_budget_bytes(device)` | Usable device bytes after reserved headroom |
 
 Typical drive loop:
 
