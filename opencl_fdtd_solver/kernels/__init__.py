@@ -11,6 +11,7 @@ from pathlib import Path
 _KERNEL_DIR = Path(__file__).resolve().parent
 
 # Compile-time concatenation order (must match historical monolithic source).
+# precision.cl is always prepended (FP32/FP64 typedefs via -DUSE_FP64).
 KERNEL_FILES = (
     "yee_update.cl",
     "sources.cl",
@@ -20,7 +21,7 @@ KERNEL_FILES = (
 
 def load_kernel_source(names: tuple[str, ...] = KERNEL_FILES) -> str:
     """Load and concatenate packaged ``.cl`` files into one OpenCL program source."""
-    chunks = []
+    chunks = [(_KERNEL_DIR / "precision.cl").read_text(encoding="utf-8")]
     for name in names:
         path = _KERNEL_DIR / name
         chunks.append(path.read_text(encoding="utf-8"))

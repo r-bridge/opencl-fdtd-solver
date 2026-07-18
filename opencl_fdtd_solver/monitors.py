@@ -411,8 +411,13 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         self._face_offsets = tuple(offs)
         self.n_face_samples = int(sum(self._face_counts))
 
+        self._real = fdtd.real
+        self._dtype = fdtd.dtype
+        self._complex_dtype = fdtd.complex_dtype
+        self._itemsize = int(fdtd.dtype.itemsize)
+
         mf = cl.mem_flags
-        nbytes = self.n_face_samples * 8  # float2
+        nbytes = self.n_face_samples * 2 * self._itemsize  # real2
         self.Ex_dft_buf = cl.Buffer(fdtd.ctx, mf.READ_WRITE, nbytes)
         self.Ey_dft_buf = cl.Buffer(fdtd.ctx, mf.READ_WRITE, nbytes)
         self.Ez_dft_buf = cl.Buffer(fdtd.ctx, mf.READ_WRITE, nbytes)
@@ -420,7 +425,7 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         self.Hy_dft_buf = cl.Buffer(fdtd.ctx, mf.READ_WRITE, nbytes)
         self.Hz_dft_buf = cl.Buffer(fdtd.ctx, mf.READ_WRITE, nbytes)
 
-        zeros = np.zeros(self.n_face_samples * 2, dtype=np.float32)
+        zeros = np.zeros(self.n_face_samples * 2, dtype=self._dtype)
         for buf in (
             self.Ex_dft_buf,
             self.Ey_dft_buf,
@@ -478,9 +483,9 @@ class OpenCLNear2FarMonitor(Near2FarBase):
             return
         mf = cl.mem_flags
         fdtd = self.fdtd
-        nbytes = self.n_face_samples * 8
+        nbytes = self.n_face_samples * 2 * self._itemsize
         self._dft_snap = tuple(cl.Buffer(fdtd.ctx, mf.READ_WRITE, nbytes) for _ in range(6))
-        zeros = np.zeros(self.n_face_samples * 2, dtype=np.float32)
+        zeros = np.zeros(self.n_face_samples * 2, dtype=self._dtype)
         for buf in self._dft_snap:
             cl.enqueue_copy(fdtd.queue, buf, zeros)
 
@@ -512,8 +517,12 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         mf = cl.mem_flags
         if self._dft_rel_n_groups < n_groups:
             self._dft_rel_n_groups = n_groups
-            self._dft_rel_partial_num = cl.Buffer(fdtd.ctx, mf.WRITE_ONLY, n_groups * 4)
-            self._dft_rel_partial_den = cl.Buffer(fdtd.ctx, mf.WRITE_ONLY, n_groups * 4)
+            self._dft_rel_partial_num = cl.Buffer(
+                fdtd.ctx, mf.WRITE_ONLY, n_groups * self._itemsize
+            )
+            self._dft_rel_partial_den = cl.Buffer(
+                fdtd.ctx, mf.WRITE_ONLY, n_groups * self._itemsize
+            )
 
         cur = self._dft_bufs()
         prev = self._dft_snap
@@ -533,8 +542,8 @@ class OpenCLNear2FarMonitor(Near2FarBase):
             prev[5],
             self._dft_rel_partial_num,
             self._dft_rel_partial_den,
-            cl.LocalMemory(lsize * 4),
-            cl.LocalMemory(lsize * 4),
+            cl.LocalMemory(lsize * self._itemsize),
+            cl.LocalMemory(lsize * self._itemsize),
         )
         cl.enqueue_nd_range_kernel(
             fdtd.queue,
@@ -542,8 +551,8 @@ class OpenCLNear2FarMonitor(Near2FarBase):
             (gsize,),
             (lsize,),
         )
-        num_h = np.empty(n_groups, dtype=np.float32)
-        den_h = np.empty(n_groups, dtype=np.float32)
+        num_h = np.empty(n_groups, dtype=self._dtype)
+        den_h = np.empty(n_groups, dtype=self._dtype)
         cl.enqueue_copy(fdtd.queue, num_h, self._dft_rel_partial_num)
         cl.enqueue_copy(fdtd.queue, den_h, self._dft_rel_partial_den)
         fdtd.queue.finish()
@@ -560,10 +569,10 @@ class OpenCLNear2FarMonitor(Near2FarBase):
             self._phase *= self._dphase
 
         phase_h = self._phase * self._h_half_step
-        pr_e = np.float32(self._phase.real)
-        pi_e = np.float32(self._phase.imag)
-        pr_h = np.float32(phase_h.real)
-        pi_h = np.float32(phase_h.imag)
+        pr_e = self._real(self._phase.real)
+        pi_e = self._real(self._phase.imag)
+        pr_h = self._real(phase_h.real)
+        pi_h = self._real(phase_h.imag)
         o0, o1, o2, o3, o4, o5 = self._offs_i32
         ix0, ix1, iy0, iy1, iz0, iz1 = self._box_i32
 
@@ -610,13 +619,13 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         fdtd = self.fdtd
         if self._obs_buf is None or n_obs > self._obs_cap:
             self._obs_cap = max(n_obs, 64)
-            self._obs_buf = cl.Buffer(fdtd.ctx, mf.READ_ONLY, self._obs_cap * 3 * 4)
+            self._obs_buf = cl.Buffer(fdtd.ctx, mf.READ_ONLY, self._obs_cap * 3 * self._itemsize)
         if self._eh_buf is None or n_obs > self._eh_cap:
             self._eh_cap = max(n_obs, 64)
-            # 6 float2 per observation (E,H)
-            self._eh_buf = cl.Buffer(fdtd.ctx, mf.WRITE_ONLY, self._eh_cap * 6 * 8)
-            # Integrated N,L (also 6 float2 per obs)
-            self._nl_buf = cl.Buffer(fdtd.ctx, mf.READ_WRITE, self._eh_cap * 6 * 8)
+            # 6 real2 per observation (E,H)
+            self._eh_buf = cl.Buffer(fdtd.ctx, mf.WRITE_ONLY, self._eh_cap * 6 * 2 * self._itemsize)
+            # Integrated N,L (also 6 real2 per obs)
+            self._nl_buf = cl.Buffer(fdtd.ctx, mf.READ_WRITE, self._eh_cap * 6 * 2 * self._itemsize)
 
     def get_farfields(self, obs_points) -> np.ndarray:
         """
@@ -627,7 +636,7 @@ class OpenCLNear2FarMonitor(Near2FarBase):
 
         Returns shape ``(n_obs, 6)`` complex (Ex,Ey,Ez,Hx,Hy,Hz).
         """
-        pts = np.asarray(obs_points, dtype=np.float32)
+        pts = np.asarray(obs_points, dtype=self._dtype)
         if pts.ndim == 1:
             pts = pts.reshape(1, 3)
         if pts.shape[1] != 3:
@@ -636,16 +645,16 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         n_face = int(self.n_face_samples)
         self._ensure_obs_bufs(n_obs)
         fdtd = self.fdtd
-        flat = np.ascontiguousarray(pts.reshape(-1), dtype=np.float32)
+        flat = np.ascontiguousarray(pts.reshape(-1), dtype=self._dtype)
         cl.enqueue_copy(fdtd.queue, self._obs_buf, flat)
 
         # Zero N,L accumulators
-        zeros = np.zeros(n_obs * 6 * 2, dtype=np.float32)
+        zeros = np.zeros(n_obs * 6 * 2, dtype=self._dtype)
         cl.enqueue_copy(fdtd.queue, self._nl_buf, zeros)
 
-        k_wave = np.float32(self.omega / C0)
-        dl = np.float32(self.dl)
-        eta0 = np.float32(ETA0)
+        k_wave = self._real(self.omega / C0)
+        dl = self._real(self.dl)
+        eta0 = self._real(ETA0)
         offs = [np.int32(o) for o in self._face_offsets]
 
         # Prefer 256 threads along the face axis (power-of-two local reduce).
@@ -654,7 +663,7 @@ class OpenCLNear2FarMonitor(Near2FarBase):
             lsize0 //= 2
         lsize0 = max(1, lsize0)
         g0 = ((n_face + lsize0 - 1) // lsize0) * lsize0
-        local_bytes = 6 * lsize0 * 8  # float2 scratch
+        local_bytes = 6 * lsize0 * 2 * self._itemsize  # real2 scratch
 
         fdtd.kern_farfield_accumulate_nl.set_args(
             np.int32(n_face),
@@ -701,7 +710,7 @@ class OpenCLNear2FarMonitor(Near2FarBase):
             self._nl_buf,
             self._eh_buf,
         )
-        host = np.empty(n_obs * 6 * 2, dtype=np.float32)
+        host = np.empty(n_obs * 6 * 2, dtype=self._dtype)
         cl.enqueue_copy(fdtd.queue, host, self._eh_buf)
         fdtd.queue.finish()
         c = host[0::2] + 1j * host[1::2]
@@ -724,7 +733,7 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         n = max(3, int(n_angles))
         angles = np.linspace(-180.0, 180.0, n, dtype=np.float64)
         rad = np.deg2rad(angles)
-        pts = np.column_stack([R * np.sin(rad), np.zeros(n), R * np.cos(rad)]).astype(np.float32)
+        pts = np.column_stack([R * np.sin(rad), np.zeros(n), R * np.cos(rad)]).astype(self._dtype)
         eh = self.get_farfields(pts)
         db = np.empty(n, dtype=np.float64)
         for i in range(n):
@@ -739,7 +748,7 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         shape = (self.fdtd.Nx, self.fdtd.Ny, self.fdtd.Nz)
 
         def _fetch_faces(buf):
-            host = np.empty(self.n_face_samples * 2, dtype=np.float32)
+            host = np.empty(self.n_face_samples * 2, dtype=self._dtype)
             cl.enqueue_copy(self.fdtd.queue, host, buf)
             return host[0::2] + 1j * host[1::2]
 
@@ -754,7 +763,7 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         }
 
         def _scatter(face_arr):
-            vol = np.zeros(shape, dtype=np.complex64)
+            vol = np.zeros(shape, dtype=self._complex_dtype)
             # x faces
             for face_id, ii in ((0, self.ix0), (1, self.ix1)):
                 base = self._face_offsets[face_id]

@@ -101,7 +101,7 @@ class OpenCLFDTD(SourceMonitorMixin):
         shape : (Nx, Ny, Nz) Yee cells
         dl    : uniform cell size in metres
         npml  : PML thickness in cells
-        dtype : data type for computation (``np.float32`` only; OpenCL kernels are float32)
+        dtype : ``np.float32`` (default) or ``np.float64`` (needs device FP64)
         ctx   : pre-existing OpenCL context (optional)
         queue : pre-existing OpenCL command queue (optional)
         """
@@ -109,9 +109,13 @@ class OpenCLFDTD(SourceMonitorMixin):
         self.dl = float(dl)
         self.npml = int(npml)
         dtype = np.dtype(dtype)
-        if dtype != np.float32:
-            raise ValueError(f"OpenCLFDTD only supports float32 computation; got {dtype!r}")
+        if dtype not in (np.dtype(np.float32), np.dtype(np.float64)):
+            raise ValueError(f"OpenCLFDTD supports float32 or float64 computation; got {dtype!r}")
         self.dtype = dtype
+        self.real = np.float32 if dtype == np.dtype(np.float32) else np.float64
+        self.complex_dtype = (
+            np.dtype(np.complex64) if dtype == np.dtype(np.float32) else np.dtype(np.complex128)
+        )
         self.t = 0.0
         self.step_num = 0
 
@@ -132,8 +136,13 @@ class OpenCLFDTD(SourceMonitorMixin):
         else:
             self.queue = queue
 
+        if self.dtype == np.dtype(np.float64):
+            self._require_device_fp64(self.device)
+
         logging.getLogger(__name__).info(
-            "OpenCL FDTD Solver initialized on device: %s", self.device.name
+            "OpenCL FDTD Solver initialized on device: %s (dtype=%s)",
+            self.device.name,
+            self.dtype.name,
         )
 
         self._check_device_memory(shape, self.npml, self.dtype)
@@ -297,16 +306,38 @@ class OpenCLFDTD(SourceMonitorMixin):
                 f"and order-of-magnitude slower runs."
             )
 
+    @staticmethod
+    def _device_supports_fp64(device) -> bool:
+        exts = device.extensions
+        return ("cl_khr_fp64" in exts) or ("cl_amd_fp64" in exts)
+
+    @classmethod
+    def _require_device_fp64(cls, device) -> None:
+        if not cls._device_supports_fp64(device):
+            raise ValueError(
+                f"OpenCL FP64 requested but device {device.name!r} lacks "
+                f"cl_khr_fp64 / cl_amd_fp64 (extensions={device.extensions!r})"
+            )
+        if "cl_khr_int64_base_atomics" not in device.extensions:
+            # Far-field NL reduction uses 64-bit CAS atomics in FP64 builds.
+            raise ValueError(
+                f"OpenCL FP64 on {device.name!r} also needs "
+                f"cl_khr_int64_base_atomics for near-to-far atomics"
+            )
+
     def _compile_kernels(self):
         """Compile Yee-grid FDTD update kernels (coalesced NDRange + interior/PML split)."""
         # Work-item mapping: get_global_id(0)=k, (1)=j, (2)=i so adjacent threads
         # touch contiguous addresses along the fastest array axis (k).
-        # Kernel sources live in opencl_fdtd_solver/kernels/*.cl
+        # Kernel sources live in opencl_fdtd_solver/kernels/*.cl (precision.cl first).
         kernel_src = load_kernel_source()
         # -cl-mad-enable: allow a*b+c fusion into mad/fma. Kept conservative;
         # -cl-fast-relaxed-math is avoided so POCL-generated golden baselines
         # and far-field null floors stay reproducible.
-        self.program = cl.Program(self.ctx, kernel_src).build(options=["-cl-mad-enable"])
+        options = ["-cl-mad-enable"]
+        if self.dtype == np.dtype(np.float64):
+            options.append("-DUSE_FP64=1")
+        self.program = cl.Program(self.ctx, kernel_src).build(options=options)
         self.kern_update_H_interior = cl.Kernel(self.program, "update_H_interior")
         self.kern_update_H_pml = cl.Kernel(self.program, "update_H_pml")
         self.kern_update_E_interior = cl.Kernel(self.program, "update_E_interior")
@@ -383,7 +414,7 @@ class OpenCLFDTD(SourceMonitorMixin):
             np.int32(self.Ny),
             np.int32(self.Nz),
             np.int32(z_src),
-            np.float32(amp),
+            self.real(amp),
             np.int32(i0_i),
             np.int32(i1_i),
             np.int32(j0_i),
@@ -438,13 +469,13 @@ class OpenCLFDTD(SourceMonitorMixin):
             np.int32(self.Ny),
             np.int32(self.Nz),
             np.int32(z_src),
-            np.float32(jx),
+            self.real(jx),
             np.int32(i0_i),
             np.int32(i1_i),
             np.int32(j0_i),
             np.int32(j1_i),
             np.int32(1 if rim_taper else 0),
-            np.float32(re),
+            self.real(re),
             self.ce_buf,
             self.Ex_buf,
         )
@@ -452,8 +483,8 @@ class OpenCLFDTD(SourceMonitorMixin):
     def _update_H(self):
         nx, ny, nz = np.int32(self.Nx), np.int32(self.Ny), np.int32(self.Nz)
         npml = np.int32(self.npml)
-        dtm_f = np.float32(self.dt / MU0)
-        dtm_dl = np.float32(self.dt / (MU0 * self.dl))
+        dtm_f = self.real(self.dt / MU0)
+        dtm_dl = self.real(self.dt / (MU0 * self.dl))
 
         if self.npml > 0:
             if self._gs_interior is not None:
@@ -543,7 +574,7 @@ class OpenCLFDTD(SourceMonitorMixin):
     def _update_E(self):
         nx, ny, nz = np.int32(self.Nx), np.int32(self.Ny), np.int32(self.Nz)
         npml = np.int32(self.npml)
-        inv_dl = np.float32(1.0 / self.dl)
+        inv_dl = self.real(1.0 / self.dl)
         ce = (self.ce_x_buf, self.ce_y_buf, self.ce_z_buf)
 
         if self.npml > 0:

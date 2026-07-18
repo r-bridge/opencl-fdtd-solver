@@ -4,6 +4,8 @@ A lightweight, high-performance, generic 3D Yee-grid Finite-Difference Time-Doma
 
 **Validating the physics?** Start with [`docs/PHYSICS.md`](docs/PHYSICS.md) — formulation, assumptions, and Meep/analytic evidence written for physicists rather than programmers.
 
+**Using the library?** See [`docs/API.md`](docs/API.md) for the public Python API (solvers, sources, near-to-far monitors, FP32/FP64).
+
 ---
 
 ## 1. Licensing & Attribution
@@ -16,6 +18,7 @@ The mathematical formulations for the Yee-grid field updates and the Convolution
 
 ## 2. Features
 *   **OpenCL Acceleration:** Runs field updates and DFT accumulations 100% on the GPU/accelerator using customized OpenCL kernels.
+*   **FP32 / FP64:** Same kernel sources; `OpenCLFDTD(..., dtype=np.float64)` when the device has `cl_khr_fp64` (expect ~2× cost from bandwidth). No separate CUDA engine.
 *   **Pluggable Monitors:** Supports host-side NumPy monitors and GPU-side OpenCL monitors for zero-copy DFT accumulation.
 *   **NumPy Fallback:** Includes a pure NumPy CPU reference implementation (`NumPyFDTD`) for testing, fallback, and benchmarking.
 *   **Cell-wise materials:** Nondispersive scalar εᵣ via `set_epsilon`. Subpixel averaging / geometry meshing is left to the caller (see §6).
@@ -24,7 +27,7 @@ The mathematical formulations for the Yee-grid field updates and the Convolution
 ---
 
 ## 3. Installation
-Ensure you have an OpenCL platform (NVIDIA CUDA, AMD, Intel, or POCL) installed, then:
+Ensure you have an OpenCL platform (NVIDIA, AMD, Intel, or POCL) installed, then:
 
 ```bash
 pip install -e .
@@ -32,7 +35,15 @@ pip install -e .
 pip install -e ".[test]"
 ```
 
-For GPU runs, point PyOpenCL at your GPU platform (often `0` for NVIDIA CUDA):
+FP64 example (device must advertise OpenCL double support):
+
+```python
+import numpy as np
+from opencl_fdtd_solver import OpenCLFDTD
+sim = OpenCLFDTD((200, 200, 200), 1e-3, npml=12, dtype=np.float64)
+```
+
+For GPU runs, point PyOpenCL at your GPU platform (often `0` for NVIDIA):
 
 ```bash
 # Linux / macOS
@@ -137,7 +148,7 @@ This package is a **2nd-order Yee + CPML kernel**. For nondispersive scalar-ε p
 
 **Evidence (MEEP-relative, abstract cases):** mid-plane Ex shape agrees at ~98% Pearson correlation with ~3% aligned residual energy; far-field main-lobe |S|(θ) differs by ~0.7 dB (vacuum) to ~2.8 dB (εᵣ=4 sphere) under the CI masks. Those baselines use hard voxel materials (`eps_averaging=False` on the MEEP side) and do not certify a specific device design.
 
-**When MEEP (or another full-featured solver) is usually ahead in practice:** dispersive / lossy / magnetic media, PEC/periodic/symmetry BCs, double precision, or any workflow that relies on a built-in geometry stack you do not provide yourself.
+**When MEEP (or another full-featured solver) is usually ahead in practice:** dispersive / lossy / magnetic media, PEC/periodic/symmetry BCs, or any workflow that relies on a built-in geometry stack you do not provide yourself. (This solver supports OpenCL FP64 via `dtype=np.float64` when the device allows it — see [`docs/API.md`](docs/API.md).)
 
 **Subpixel averaging is intentionally out of scope.** The solver only accepts a cell-wise scalar εᵣ via `set_epsilon`; geometry sampling and effective-medium construction belong in the application layer. Typical choices include ~4³ subvoxels per Yee cell. At least two approaches fit this design:
 

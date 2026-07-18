@@ -28,6 +28,7 @@ SUITES = [
     "tests.test_unit_farfield_baselines",
     "tests.test_unit_cpml",
     "tests.test_analytic_validation",
+    "tests.test_api_docs",
 ]
 
 
