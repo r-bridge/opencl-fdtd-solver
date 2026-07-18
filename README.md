@@ -4,6 +4,8 @@ A lightweight, high-performance, generic 3D Yee-grid Finite-Difference Time-Doma
 
 **Validating the physics?** Start with [`docs/PHYSICS.md`](docs/PHYSICS.md) — formulation, assumptions, and Meep/analytic evidence written for physicists rather than programmers.
 
+**Using the library?** See [`docs/API.md`](docs/API.md) for the public Python API (solvers, sources, near-to-far monitors, FP32/FP64).
+
 ---
 
 ## 1. Licensing & Attribution
