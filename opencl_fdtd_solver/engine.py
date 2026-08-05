@@ -96,7 +96,9 @@ class OpenCLFDTD(SourceMonitorMixin):
     MEMORY_HEADROOM_FRACTION = 0.12
     MEMORY_HEADROOM_BYTES = 512 * 1024 * 1024
 
-    def __init__(self, shape, dl, npml=20, dtype=np.float32, ctx=None, queue=None):
+    def __init__(
+        self, shape, dl, npml=20, dtype=np.float32, ctx=None, queue=None, accum_fp64=False
+    ):
         """
         shape : (Nx, Ny, Nz) Yee cells
         dl    : uniform cell size in metres
@@ -104,6 +106,14 @@ class OpenCLFDTD(SourceMonitorMixin):
         dtype : ``np.float32`` (default) or ``np.float64`` (needs device FP64)
         ctx   : pre-existing OpenCL context (optional)
         queue : pre-existing OpenCL command queue (optional)
+        accum_fp64 : monitor DFT / near-to-far accumulators use double precision
+            regardless of ``dtype`` (default False, matching legacy
+            single-precision-everywhere behavior; needs device FP64 when
+            enabled). These buffers are sized by monitor face-sample count,
+            not the volumetric grid, so the memory cost of turning this on
+            is negligible even when the main solver stays fp32 — opt in when
+            you want to rule out DFT/near-to-far accumulation round-off
+            without doubling the whole grid's memory footprint.
         """
         self.Nx, self.Ny, self.Nz = shape
         self.dl = float(dl)
@@ -115,6 +125,11 @@ class OpenCLFDTD(SourceMonitorMixin):
         self.real = np.float32 if dtype == np.dtype(np.float32) else np.float64
         self.complex_dtype = (
             np.dtype(np.complex64) if dtype == np.dtype(np.float32) else np.dtype(np.complex128)
+        )
+        self.accum_fp64 = bool(accum_fp64) or dtype == np.dtype(np.float64)
+        self.accreal = np.float64 if self.accum_fp64 else self.real
+        self.accreal_complex_dtype = (
+            np.dtype(np.complex128) if self.accum_fp64 else self.complex_dtype
         )
         self.t = 0.0
         self.step_num = 0
@@ -136,7 +151,7 @@ class OpenCLFDTD(SourceMonitorMixin):
         else:
             self.queue = queue
 
-        if self.dtype == np.dtype(np.float64):
+        if self.dtype == np.dtype(np.float64) or self.accum_fp64:
             self._require_device_fp64(self.device)
 
         logging.getLogger(__name__).info(
@@ -337,6 +352,7 @@ class OpenCLFDTD(SourceMonitorMixin):
         options = ["-cl-mad-enable"]
         if self.dtype == np.dtype(np.float64):
             options.append("-DUSE_FP64=1")
+        options.append(f"-DACCUM_FP64={1 if self.accum_fp64 else 0}")
         self.program = cl.Program(self.ctx, kernel_src).build(options=options)
         self.kern_update_H_interior = cl.Kernel(self.program, "update_H_interior")
         self.kern_update_H_pml = cl.Kernel(self.program, "update_H_pml")

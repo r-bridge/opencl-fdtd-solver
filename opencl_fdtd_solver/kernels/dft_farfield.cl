@@ -95,10 +95,10 @@ __kernel void accumulate_dft_face(
     face_dft[dst] = cur;
 }
 
-inline void dft_add(__global real2 *slot, real val, real pr, real pi) {
-    real2 cur = *slot;
-    cur.x += val * pr;
-    cur.y += val * pi;
+inline void dft_add(__global accreal2 *slot, real val, accreal pr, accreal pi) {
+    accreal2 cur = *slot;
+    cur.x += (accreal)val * pr;
+    cur.y += (accreal)val * pi;
     *slot = cur;
 }
 
@@ -106,6 +106,12 @@ inline void dft_add(__global real2 *slot, real val, real pr, real pi) {
  * One launch over packed face samples: for each Huygens face sample,
  * DFT only the tangential Ex..Hz components that enter the N/L integral.
  * Replaces 36 per-step accumulate_dft_face launches.
+ *
+ * Phase args and the output buffers accumulate at `accreal` precision
+ * (double by default, see precision.cl) even though the field samples
+ * themselves (`Ex`..`Hz`, from the volumetric grid) stay at `real`
+ * (fp32) precision — this targets round-off compounding across the
+ * 12k-step running sum without doubling the ~8GB volumetric grid.
  */
 __kernel void accumulate_dft_faces_fused(
     int Nx, int Ny, int Nz,
@@ -114,20 +120,20 @@ __kernel void accumulate_dft_faces_fused(
     int iz0, int iz1,
     int off0, int off1, int off2, int off3, int off4, int off5,
     int n_face,
-    real phase_e_real, real phase_e_imag,
-    real phase_h_real, real phase_h_imag,
+    accreal phase_e_real, accreal phase_e_imag,
+    accreal phase_h_real, accreal phase_h_imag,
     __global const real * restrict Ex,
     __global const real * restrict Ey,
     __global const real * restrict Ez,
     __global const real * restrict Hx,
     __global const real * restrict Hy,
     __global const real * restrict Hz,
-    __global real2 * restrict Ex_dft,
-    __global real2 * restrict Ey_dft,
-    __global real2 * restrict Ez_dft,
-    __global real2 * restrict Hx_dft,
-    __global real2 * restrict Hy_dft,
-    __global real2 * restrict Hz_dft
+    __global accreal2 * restrict Ex_dft,
+    __global accreal2 * restrict Ey_dft,
+    __global accreal2 * restrict Ez_dft,
+    __global accreal2 * restrict Hx_dft,
+    __global accreal2 * restrict Hy_dft,
+    __global accreal2 * restrict Hz_dft
 ) {
     int face_i = get_global_id(0);
     if (face_i >= n_face) return;
@@ -159,8 +165,8 @@ __kernel void accumulate_dft_faces_fused(
     (void)nxf;
 
     int idx = abs_i * Ny * Nz + abs_j * Nz + abs_k;
-    real pr_e = phase_e_real, pi_e = phase_e_imag;
-    real pr_h = phase_h_real, pi_h = phase_h_imag;
+    accreal pr_e = phase_e_real, pi_e = phase_e_imag;
+    accreal pr_h = phase_h_real, pi_h = phase_h_imag;
 
 /* Co-locate tangential E/H at the face-center (half-cell averages), then DFT.
  * H uses phase_h = phase_e * exp(-j ω Δt/2): at monitor time E is at
@@ -230,30 +236,30 @@ __kernel void accumulate_dft_faces_fused(
  */
 __kernel void dft_rel_change_partial(
     int n,
-    __global const real2 * restrict Ex_c,
-    __global const real2 * restrict Ey_c,
-    __global const real2 * restrict Ez_c,
-    __global const real2 * restrict Hx_c,
-    __global const real2 * restrict Hy_c,
-    __global const real2 * restrict Hz_c,
-    __global const real2 * restrict Ex_p,
-    __global const real2 * restrict Ey_p,
-    __global const real2 * restrict Ez_p,
-    __global const real2 * restrict Hx_p,
-    __global const real2 * restrict Hy_p,
-    __global const real2 * restrict Hz_p,
-    __global real * restrict partial_num,
-    __global real * restrict partial_den,
-    __local real *sn,
-    __local real *sd
+    __global const accreal2 * restrict Ex_c,
+    __global const accreal2 * restrict Ey_c,
+    __global const accreal2 * restrict Ez_c,
+    __global const accreal2 * restrict Hx_c,
+    __global const accreal2 * restrict Hy_c,
+    __global const accreal2 * restrict Hz_c,
+    __global const accreal2 * restrict Ex_p,
+    __global const accreal2 * restrict Ey_p,
+    __global const accreal2 * restrict Ez_p,
+    __global const accreal2 * restrict Hx_p,
+    __global const accreal2 * restrict Hy_p,
+    __global const accreal2 * restrict Hz_p,
+    __global accreal * restrict partial_num,
+    __global accreal * restrict partial_den,
+    __local accreal *sn,
+    __local accreal *sd
 ) {
     int lid = get_local_id(0);
     int gid = get_global_id(0);
     int grp = get_group_id(0);
-    real nsum = (real)0.0;
-    real dsum = (real)0.0;
+    accreal nsum = (accreal)0.0;
+    accreal dsum = (accreal)0.0;
     if (gid < n) {
-        real2 c, p, d;
+        accreal2 c, p, d;
         #define DFT_ACC(CUR, PREV) \
             c = (CUR)[gid]; p = (PREV)[gid]; \
             d.x = c.x - p.x; d.y = c.y - p.y; \
@@ -292,6 +298,19 @@ inline void caccum(real2 *acc, real2 val) {
     acc->y += val.y;
 }
 
+/* accreal2 counterparts — used for the N/L reduction (see face_sample_NL /
+ * farfield_accumulate_nl below), which sums ~1e6 face samples per
+ * observation angle and benefits from the same accreal precision as the
+ * DFT accumulator it reads from. */
+inline accreal2 cmul_acc(accreal2 a, accreal2 b) {
+    return (accreal2)(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}
+
+inline void caccum_acc(accreal2 *acc, accreal2 val) {
+    acc->x += val.x;
+    acc->y += val.y;
+}
+
 inline void atomic_add_real(__global volatile real *addr, real val) {
 #if USE_FP64
     /* 64-bit CAS; needs cl_khr_int64_base_atomics (enabled in precision.cl). */
@@ -322,6 +341,33 @@ inline void atomic_add_real2(__global real2 *addr, real2 val) {
     atomic_add_real(&p[1], val.y);
 }
 
+/*
+ * accreal variants: the N/L near-to-far reduction sums ~1e6 face samples
+ * per observation angle via atomic add — at least as prone to round-off
+ * compounding as the per-step DFT accumulation above, so it gets the same
+ * accreal (double, by default) treatment independent of `real`.
+ */
+inline void atomic_add_accreal(__global volatile accreal *addr, accreal val) {
+#if ACCUM_FP64
+    union {
+        ulong u;
+        double f;
+    } oldv, newv;
+    do {
+        oldv.f = *addr;
+        newv.f = oldv.f + val;
+    } while (atom_cmpxchg((__global volatile ulong *)addr, oldv.u, newv.u) != oldv.u);
+#else
+    atomic_add_real((__global volatile real *)addr, (real)val);
+#endif
+}
+
+inline void atomic_add_accreal2(__global accreal2 *addr, accreal2 val) {
+    __global accreal *p = (__global accreal *)addr;
+    atomic_add_accreal(&p[0], val.x);
+    atomic_add_accreal(&p[1], val.y);
+}
+
 /* Contribution of one packed face sample into N,L (6 real2). */
 inline void face_sample_NL(
     int face_i,
@@ -329,14 +375,14 @@ inline void face_sample_NL(
     real k_wave, real dA, real dl,
     int ix0, int ix1, int iy0, int iy1, int iz0, int iz1,
     int off0, int off1, int off2, int off3, int off4, int off5,
-    __global const real2 *Ex_f,
-    __global const real2 *Ey_f,
-    __global const real2 *Ez_f,
-    __global const real2 *Hx_f,
-    __global const real2 *Hy_f,
-    __global const real2 *Hz_f,
-    real2 *Nx, real2 *Ny, real2 *Nz,
-    real2 *Lx, real2 *Ly, real2 *Lz
+    __global const accreal2 *Ex_f,
+    __global const accreal2 *Ey_f,
+    __global const accreal2 *Ez_f,
+    __global const accreal2 *Hx_f,
+    __global const accreal2 *Hy_f,
+    __global const accreal2 *Hz_f,
+    accreal2 *Nx, accreal2 *Ny, accreal2 *Nz,
+    accreal2 *Lx, accreal2 *Ly, accreal2 *Lz
 ) {
     int nxf = ix1 - ix0 + 1;
     int nyf = iy1 - iy0 + 1;
@@ -380,7 +426,7 @@ inline void face_sample_NL(
     }
     int li = face_i;
     real phase = k_wave * (rx * xp + ry * yp + rz * zp);
-    real2 ph = (real2)(cos(phase), sin(phase));
+    accreal2 ph = (accreal2)(cos((accreal)phase), sin((accreal)phase));
 
     /* Trapezoidal face quadrature: half weight on edges, quarter on corners. */
     real wj, wk;
@@ -394,35 +440,36 @@ inline void face_sample_NL(
         wj = (abs_i == ix0 || abs_i == ix1) ? (real)0.5 : (real)1.0;
         wk = (abs_j == iy0 || abs_j == iy1) ? (real)0.5 : (real)1.0;
     }
-    real dAw = dA * wj * wk;
+    accreal dAw = (accreal)(dA * wj * wk);
+    accreal nfa = (accreal)nf;
 
     if (face <= 1) {
-        real2 Jy = cmul((real2)( nf * Hz_f[li].x,  nf * Hz_f[li].y), ph);
-        real2 Jz = cmul((real2)(-nf * Hy_f[li].x, -nf * Hy_f[li].y), ph);
-        real2 My = cmul((real2)(-nf * Ez_f[li].x, -nf * Ez_f[li].y), ph);
-        real2 Mz = cmul((real2)( nf * Ey_f[li].x,  nf * Ey_f[li].y), ph);
-        caccum(Ny, (real2)(Jy.x * dAw, Jy.y * dAw));
-        caccum(Nz, (real2)(Jz.x * dAw, Jz.y * dAw));
-        caccum(Ly, (real2)(My.x * dAw, My.y * dAw));
-        caccum(Lz, (real2)(Mz.x * dAw, Mz.y * dAw));
+        accreal2 Jy = cmul_acc((accreal2)( nfa * Hz_f[li].x,  nfa * Hz_f[li].y), ph);
+        accreal2 Jz = cmul_acc((accreal2)(-nfa * Hy_f[li].x, -nfa * Hy_f[li].y), ph);
+        accreal2 My = cmul_acc((accreal2)(-nfa * Ez_f[li].x, -nfa * Ez_f[li].y), ph);
+        accreal2 Mz = cmul_acc((accreal2)( nfa * Ey_f[li].x,  nfa * Ey_f[li].y), ph);
+        caccum_acc(Ny, (accreal2)(Jy.x * dAw, Jy.y * dAw));
+        caccum_acc(Nz, (accreal2)(Jz.x * dAw, Jz.y * dAw));
+        caccum_acc(Ly, (accreal2)(My.x * dAw, My.y * dAw));
+        caccum_acc(Lz, (accreal2)(Mz.x * dAw, Mz.y * dAw));
     } else if (face <= 3) {
-        real2 Jx = cmul((real2)(-nf * Hz_f[li].x, -nf * Hz_f[li].y), ph);
-        real2 Jz = cmul((real2)( nf * Hx_f[li].x,  nf * Hx_f[li].y), ph);
-        real2 Mx = cmul((real2)( nf * Ez_f[li].x,  nf * Ez_f[li].y), ph);
-        real2 Mz = cmul((real2)(-nf * Ex_f[li].x, -nf * Ex_f[li].y), ph);
-        caccum(Nx, (real2)(Jx.x * dAw, Jx.y * dAw));
-        caccum(Nz, (real2)(Jz.x * dAw, Jz.y * dAw));
-        caccum(Lx, (real2)(Mx.x * dAw, Mx.y * dAw));
-        caccum(Lz, (real2)(Mz.x * dAw, Mz.y * dAw));
+        accreal2 Jx = cmul_acc((accreal2)(-nfa * Hz_f[li].x, -nfa * Hz_f[li].y), ph);
+        accreal2 Jz = cmul_acc((accreal2)( nfa * Hx_f[li].x,  nfa * Hx_f[li].y), ph);
+        accreal2 Mx = cmul_acc((accreal2)( nfa * Ez_f[li].x,  nfa * Ez_f[li].y), ph);
+        accreal2 Mz = cmul_acc((accreal2)(-nfa * Ex_f[li].x, -nfa * Ex_f[li].y), ph);
+        caccum_acc(Nx, (accreal2)(Jx.x * dAw, Jx.y * dAw));
+        caccum_acc(Nz, (accreal2)(Jz.x * dAw, Jz.y * dAw));
+        caccum_acc(Lx, (accreal2)(Mx.x * dAw, Mx.y * dAw));
+        caccum_acc(Lz, (accreal2)(Mz.x * dAw, Mz.y * dAw));
     } else {
-        real2 Jx = cmul((real2)( nf * Hy_f[li].x,  nf * Hy_f[li].y), ph);
-        real2 Jy = cmul((real2)(-nf * Hx_f[li].x, -nf * Hx_f[li].y), ph);
-        real2 Mx = cmul((real2)(-nf * Ey_f[li].x, -nf * Ey_f[li].y), ph);
-        real2 My = cmul((real2)( nf * Ex_f[li].x,  nf * Ex_f[li].y), ph);
-        caccum(Nx, (real2)(Jx.x * dAw, Jx.y * dAw));
-        caccum(Ny, (real2)(Jy.x * dAw, Jy.y * dAw));
-        caccum(Lx, (real2)(Mx.x * dAw, Mx.y * dAw));
-        caccum(Ly, (real2)(My.x * dAw, My.y * dAw));
+        accreal2 Jx = cmul_acc((accreal2)( nfa * Hy_f[li].x,  nfa * Hy_f[li].y), ph);
+        accreal2 Jy = cmul_acc((accreal2)(-nfa * Hx_f[li].x, -nfa * Hx_f[li].y), ph);
+        accreal2 Mx = cmul_acc((accreal2)(-nfa * Ey_f[li].x, -nfa * Ey_f[li].y), ph);
+        accreal2 My = cmul_acc((accreal2)( nfa * Ex_f[li].x,  nfa * Ex_f[li].y), ph);
+        caccum_acc(Nx, (accreal2)(Jx.x * dAw, Jx.y * dAw));
+        caccum_acc(Ny, (accreal2)(Jy.x * dAw, Jy.y * dAw));
+        caccum_acc(Lx, (accreal2)(Mx.x * dAw, Mx.y * dAw));
+        caccum_acc(Ly, (accreal2)(My.x * dAw, My.y * dAw));
     }
 }
 
@@ -440,26 +487,26 @@ __kernel void farfield_accumulate_nl(
     int iy0, int iy1,
     int iz0, int iz1,
     int off0, int off1, int off2, int off3, int off4, int off5,
-    __global const real2 *Ex_f,
-    __global const real2 *Ey_f,
-    __global const real2 *Ez_f,
-    __global const real2 *Hx_f,
-    __global const real2 *Hy_f,
-    __global const real2 *Hz_f,
-    __global real2 *NL_out,
-    __local real2 *scratch
+    __global const accreal2 *Ex_f,
+    __global const accreal2 *Ey_f,
+    __global const accreal2 *Ez_f,
+    __global const accreal2 *Hx_f,
+    __global const accreal2 *Hy_f,
+    __global const accreal2 *Hz_f,
+    __global accreal2 *NL_out,
+    __local accreal2 *scratch
 ) {
     int face_i = get_global_id(0);
     int obs = get_global_id(1);
     int lid = get_local_id(0);
     int lsize = get_local_size(0);
 
-    real2 Nx = (real2)((real)0.0, (real)0.0);
-    real2 Ny = (real2)((real)0.0, (real)0.0);
-    real2 Nz = (real2)((real)0.0, (real)0.0);
-    real2 Lx = (real2)((real)0.0, (real)0.0);
-    real2 Ly = (real2)((real)0.0, (real)0.0);
-    real2 Lz = (real2)((real)0.0, (real)0.0);
+    accreal2 Nx = (accreal2)((accreal)0.0, (accreal)0.0);
+    accreal2 Ny = (accreal2)((accreal)0.0, (accreal)0.0);
+    accreal2 Nz = (accreal2)((accreal)0.0, (accreal)0.0);
+    accreal2 Lx = (accreal2)((accreal)0.0, (accreal)0.0);
+    accreal2 Ly = (accreal2)((accreal)0.0, (accreal)0.0);
+    accreal2 Lz = (accreal2)((accreal)0.0, (accreal)0.0);
 
     if (face_i < n_face && obs < n_obs) {
         real ox = obs_xyz[3 * obs + 0];
@@ -499,12 +546,12 @@ __kernel void farfield_accumulate_nl(
 
     if (lid == 0 && obs < n_obs) {
         int base = 6 * obs;
-        atomic_add_real2(&NL_out[base + 0], scratch[0 * lsize]);
-        atomic_add_real2(&NL_out[base + 1], scratch[1 * lsize]);
-        atomic_add_real2(&NL_out[base + 2], scratch[2 * lsize]);
-        atomic_add_real2(&NL_out[base + 3], scratch[3 * lsize]);
-        atomic_add_real2(&NL_out[base + 4], scratch[4 * lsize]);
-        atomic_add_real2(&NL_out[base + 5], scratch[5 * lsize]);
+        atomic_add_accreal2(&NL_out[base + 0], scratch[0 * lsize]);
+        atomic_add_accreal2(&NL_out[base + 1], scratch[1 * lsize]);
+        atomic_add_accreal2(&NL_out[base + 2], scratch[2 * lsize]);
+        atomic_add_accreal2(&NL_out[base + 3], scratch[3 * lsize]);
+        atomic_add_accreal2(&NL_out[base + 4], scratch[4 * lsize]);
+        atomic_add_accreal2(&NL_out[base + 5], scratch[5 * lsize]);
     }
 }
 
@@ -514,53 +561,54 @@ __kernel void farfield_nl_to_eh(
     __global const real *obs_xyz,
     real k_wave,
     real eta0,
-    __global const real2 *NL_in,
-    __global real2 *EH_out
+    __global const accreal2 *NL_in,
+    __global accreal2 *EH_out
 ) {
     int p = get_global_id(0);
     if (p >= n_obs) return;
 
-    real ox = obs_xyz[3 * p + 0];
-    real oy = obs_xyz[3 * p + 1];
-    real oz = obs_xyz[3 * p + 2];
-    real r = sqrt(ox * ox + oy * oy + oz * oz);
-    if (r < (real)1.0e-30) r = (real)1.0e-30;
-    real rx = ox / r, ry = oy / r, rz = oz / r;
-    real rhat[3] = { rx, ry, rz };
+    accreal ox = (accreal)obs_xyz[3 * p + 0];
+    accreal oy = (accreal)obs_xyz[3 * p + 1];
+    accreal oz = (accreal)obs_xyz[3 * p + 2];
+    accreal r = sqrt(ox * ox + oy * oy + oz * oz);
+    if (r < (accreal)1.0e-30) r = (accreal)1.0e-30;
+    accreal rx = ox / r, ry = oy / r, rz = oz / r;
+    accreal rhat[3] = { rx, ry, rz };
 
-    real2 Nvec[3] = { NL_in[6 * p + 0], NL_in[6 * p + 1], NL_in[6 * p + 2] };
-    real2 Lvec[3] = { NL_in[6 * p + 3], NL_in[6 * p + 4], NL_in[6 * p + 5] };
+    accreal2 Nvec[3] = { NL_in[6 * p + 0], NL_in[6 * p + 1], NL_in[6 * p + 2] };
+    accreal2 Lvec[3] = { NL_in[6 * p + 3], NL_in[6 * p + 4], NL_in[6 * p + 5] };
 
-    real ang = k_wave * r;
+    accreal k_wave_a = (accreal)k_wave, eta0_a = (accreal)eta0;
+    accreal ang = k_wave_a * r;
     // Outgoing wave ~ e^{-j k r}
-    real2 eikr = (real2)(cos(ang), -sin(ang));
-    real scale = k_wave / ((real)4.0 * (real)3.14159265358979323846 * r);
-    real2 pref = cmul((real2)((real)0.0, -scale), eikr);
+    accreal2 eikr = (accreal2)(cos(ang), -sin(ang));
+    accreal scale = k_wave_a / ((accreal)4.0 * (accreal)3.14159265358979323846 * r);
+    accreal2 pref = cmul_acc((accreal2)((accreal)0.0, -scale), eikr);
 
-    real2 rxL[3], Nt[3], E[3], H[3];
-    rxL[0] = (real2)(rhat[1] * Lvec[2].x - rhat[2] * Lvec[1].x,
-                      rhat[1] * Lvec[2].y - rhat[2] * Lvec[1].y);
-    rxL[1] = (real2)(rhat[2] * Lvec[0].x - rhat[0] * Lvec[2].x,
-                      rhat[2] * Lvec[0].y - rhat[0] * Lvec[2].y);
-    rxL[2] = (real2)(rhat[0] * Lvec[1].x - rhat[1] * Lvec[0].x,
-                      rhat[0] * Lvec[1].y - rhat[1] * Lvec[0].y);
+    accreal2 rxL[3], Nt[3], E[3], H[3];
+    rxL[0] = (accreal2)(rhat[1] * Lvec[2].x - rhat[2] * Lvec[1].x,
+                         rhat[1] * Lvec[2].y - rhat[2] * Lvec[1].y);
+    rxL[1] = (accreal2)(rhat[2] * Lvec[0].x - rhat[0] * Lvec[2].x,
+                         rhat[2] * Lvec[0].y - rhat[0] * Lvec[2].y);
+    rxL[2] = (accreal2)(rhat[0] * Lvec[1].x - rhat[1] * Lvec[0].x,
+                         rhat[0] * Lvec[1].y - rhat[1] * Lvec[0].y);
 
-    real2 Ndot = (real2)(
+    accreal2 Ndot = (accreal2)(
         rhat[0] * Nvec[0].x + rhat[1] * Nvec[1].x + rhat[2] * Nvec[2].x,
         rhat[0] * Nvec[0].y + rhat[1] * Nvec[1].y + rhat[2] * Nvec[2].y);
 
     for (int c = 0; c < 3; c++) {
-        Nt[c] = (real2)(Nvec[c].x - Ndot.x * rhat[c], Nvec[c].y - Ndot.y * rhat[c]);
-        real2 tE = (real2)(eta0 * Nt[c].x + rxL[c].x, eta0 * Nt[c].y + rxL[c].y);
-        E[c] = cmul(pref, tE);
+        Nt[c] = (accreal2)(Nvec[c].x - Ndot.x * rhat[c], Nvec[c].y - Ndot.y * rhat[c]);
+        accreal2 tE = (accreal2)(eta0_a * Nt[c].x + rxL[c].x, eta0_a * Nt[c].y + rxL[c].y);
+        E[c] = cmul_acc(pref, tE);
     }
     // Far-field TEM: H = -r̂ × E / η
-    H[0] = (real2)(-(rhat[1] * E[2].x - rhat[2] * E[1].x) / eta0,
-                    -(rhat[1] * E[2].y - rhat[2] * E[1].y) / eta0);
-    H[1] = (real2)(-(rhat[2] * E[0].x - rhat[0] * E[2].x) / eta0,
-                    -(rhat[2] * E[0].y - rhat[0] * E[2].y) / eta0);
-    H[2] = (real2)(-(rhat[0] * E[1].x - rhat[1] * E[0].x) / eta0,
-                    -(rhat[0] * E[1].y - rhat[1] * E[0].y) / eta0);
+    H[0] = (accreal2)(-(rhat[1] * E[2].x - rhat[2] * E[1].x) / eta0_a,
+                       -(rhat[1] * E[2].y - rhat[2] * E[1].y) / eta0_a);
+    H[1] = (accreal2)(-(rhat[2] * E[0].x - rhat[0] * E[2].x) / eta0_a,
+                       -(rhat[2] * E[0].y - rhat[0] * E[2].y) / eta0_a);
+    H[2] = (accreal2)(-(rhat[0] * E[1].x - rhat[1] * E[0].x) / eta0_a,
+                       -(rhat[0] * E[1].y - rhat[1] * E[0].y) / eta0_a);
 
     int o = 6 * p;
     EH_out[o + 0] = E[0];
