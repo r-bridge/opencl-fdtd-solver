@@ -599,7 +599,22 @@ __kernel void farfield_nl_to_eh(
 
     for (int c = 0; c < 3; c++) {
         Nt[c] = (accreal2)(Nvec[c].x - Ndot.x * rhat[c], Nvec[c].y - Ndot.y * rhat[c]);
-        accreal2 tE = (accreal2)(eta0_a * Nt[c].x + rxL[c].x, eta0_a * Nt[c].y + rxL[c].y);
+        /* Combined N/L far-field formula (Balanis eq. 12-30a/b in vector
+         * form): E = -jk e^{-jkr}/(4 pi r) * [eta*Nt - r_hat x L].
+         * The L term's sign controls the transform's one-sidedness (a
+         * Huygens surface radiates along the wave's propagation direction
+         * and nulls the opposite); with `+ rxL` that selectivity was
+         * INVERTED -- verified three independent ways: (1) a single face
+         * carrying the currents of a +Z-going wave beamed at theta=180
+         * instead of 0; (2) a disk scatterer's forward/shadow lobe (which
+         * physically must be comparable to its reflected lobe -- confirmed
+         * in Meep) came out ~70dB suppressed while the reflected lobe
+         * appeared rotation-independent; (3) after this fix the disk's
+         * rotation response matches Meep/physical-optics. The sphere-based
+         * Meep baselines barely move (outgoing-everywhere radiation is
+         * nearly insensitive to one-sidedness), which is why they never
+         * caught this. */
+        accreal2 tE = (accreal2)(eta0_a * Nt[c].x - rxL[c].x, eta0_a * Nt[c].y - rxL[c].y);
         E[c] = cmul_acc(pref, tE);
     }
     // Far-field TEM: H = -r̂ × E / η

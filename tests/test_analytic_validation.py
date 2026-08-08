@@ -302,8 +302,7 @@ class TestMieSphereRCS(unittest.TestCase):
     def setUpClass(cls):
         os.environ.setdefault("PYOPENCL_CTX", "0")
 
-    def test_eplane_pattern_matches_mie(self):
-        # Moderate-size dielectric sphere: ka ≈ 1.26, ~6 cells / radius.
+    def _run_case(self, *, with_sphere: bool):
         shape = (48, 48, 56)
         dl = 2e-3
         npml = 8
@@ -311,17 +310,14 @@ class TestMieSphereRCS(unittest.TestCase):
         fwidth = 0.25 * freq
         eps_r = 4.0
         rad_cells = 6
-        a = rad_cells * dl
-        k0 = 2.0 * np.pi * freq / C0
-        ka = k0 * a
-        self.assertGreater(ka, 1.0)
-        self.assertLess(ka, 2.0)
 
         fdtd = OpenCLFDTD(shape, dl, npml=npml)
         eps = np.ones(shape, dtype=np.float32)
-        ctr = np.array(shape) // 2
-        ii, jj, kk = np.ogrid[: shape[0], : shape[1], : shape[2]]
-        eps[(ii - ctr[0]) ** 2 + (jj - ctr[1]) ** 2 + (kk - ctr[2]) ** 2 < rad_cells**2] = eps_r
+        if with_sphere:
+            ctr = np.array(shape) // 2
+            ii, jj, kk = np.ogrid[: shape[0], : shape[1], : shape[2]]
+            inside = (ii - ctr[0]) ** 2 + (jj - ctr[1]) ** 2 + (kk - ctr[2]) ** 2 < rad_cells**2
+            eps[inside] = eps_r
         fdtd.set_epsilon(eps)
 
         # Soft Jx sheet at low z → illumination propagating roughly +z.
@@ -343,23 +339,63 @@ class TestMieSphereRCS(unittest.TestCase):
             )
 
         fdtd.add_source(src)
-        # Huygens box encloses the sphere; source is outside → N2F ≈ scattered field.
         ctr_phys = tuple(0.5 * c * dl for c in shape)
         half = (rad_cells + 4) * dl
         size = (2 * half, 2 * half, 2 * half)
         mon = OpenCLNear2FarMonitor(fdtd, ctr_phys, size, freq)
         fdtd.run(500)
 
-        angles_deg, db = mon.farfield_polar_xz(distance_m=1.0, n_angles=37)
-        lin = 10.0 ** (np.asarray(db, dtype=np.float64) / 10.0)
-        # farfield_polar_xz: obs = (R sinθ, 0, R cosθ), θ ∈ [-180°, 180°].
-        # For this soft-source geometry the measured E-plane intensity tracks
-        # Mie |S₂|² at scattering angle π−|θ| (FDTD peak near ±180° ↔ Mie
-        # forward). Absolute RCS is float32-limited and is not gated here.
-        theta_mie = np.pi - np.deg2rad(np.abs(angles_deg))
+        angles_deg = np.linspace(-180.0, 180.0, 37)
+        rad = np.deg2rad(angles_deg)
+        pts = np.column_stack([np.sin(rad), np.zeros_like(rad), np.cos(rad)])  # R = 1 m
+        return angles_deg, mon.get_farfields(pts)
+
+    def test_eplane_pattern_matches_mie(self):
+        # Moderate-size dielectric sphere: ka ≈ 1.26, ~6 cells / radius.
+        dl = 2e-3
+        freq = 5e9
+        eps_r = 4.0
+        rad_cells = 6
+        a = rad_cells * dl
+        k0 = 2.0 * np.pi * freq / C0
+        ka = k0 * a
+        self.assertGreater(ka, 1.0)
+        self.assertLess(ka, 2.0)
+
+        # True scattered field via empty subtraction (complex EH, sphere run
+        # minus identical vacuum run): the finite rim-tapered source sheet's
+        # own through-going wave does not cancel perfectly on the Huygens box,
+        # and its leakage lands in the forward direction — right on top of
+        # the Mie forward lobe — without this subtraction.
+        angles_deg, eh_sphere = self._run_case(with_sphere=True)
+        _, eh_empty = self._run_case(with_sphere=False)
+        scat = eh_sphere - eh_empty
+        E, H = scat[:, 0:3], scat[:, 3:6]
+        Sx = 0.5 * (E[:, 1] * np.conj(H[:, 2]) - E[:, 2] * np.conj(H[:, 1]))
+        Sy = 0.5 * (E[:, 2] * np.conj(H[:, 0]) - E[:, 0] * np.conj(H[:, 2]))
+        Sz = 0.5 * (E[:, 0] * np.conj(H[:, 1]) - E[:, 1] * np.conj(H[:, 0]))
+        lin = np.sqrt(np.abs(Sx) ** 2 + np.abs(Sy) ** 2 + np.abs(Sz) ** 2)
+
+        # Illumination propagates +z, so Mie forward scattering (the dominant
+        # lobe at this ka) radiates toward +z = θ=0: scattering angle |θ|.
+        # NOTE: an earlier revision of this test mapped θ_mie = π−|θ| ("FDTD
+        # peak near ±180° ↔ Mie forward") — that accommodated an inverted
+        # one-sidedness in the near-to-far kernel's N/L combination (the
+        # forward lobe was landing at the backward angle) rather than
+        # questioning it. The kernel inversion is now fixed (see
+        # dft_farfield.cl, farfield_nl_to_eh) and this test uses the physical
+        # mapping. Absolute RCS is float32-limited and is not gated here.
+        theta_mie = np.deg2rad(np.abs(angles_deg))
         mie = mie_eplane_intensity(np.sqrt(eps_r), ka, theta_mie)
         peak = float(np.max(lin))
         self.assertGreater(peak, 0.0)
+        peak_angle = float(angles_deg[int(np.argmax(lin))])
+        self.assertLess(
+            abs(peak_angle),
+            15.0,
+            f"forward-scattering peak should be at θ≈0 (+z, the propagation "
+            f"direction), got {peak_angle:.1f}°",
+        )
         mask = lin >= peak * 10 ** (-12.0 / 10.0)
         self.assertGreater(int(np.count_nonzero(mask)), 8)
 
@@ -370,8 +406,8 @@ class TestMieSphereRCS(unittest.TestCase):
         corr = float(np.corrcoef(a_m, b_s)[0, 1] if np.std(a_m) > 0 and np.std(b_s) > 0 else 0.0)
         self.assertGreater(
             corr,
-            0.90,
-            f"Mie E-plane |S| correlation {corr:.4f} (ka={ka:.3f}, expected > 0.90)",
+            0.95,
+            f"Mie E-plane |S| correlation {corr:.4f} (ka={ka:.3f}, expected > 0.95)",
         )
 
 
