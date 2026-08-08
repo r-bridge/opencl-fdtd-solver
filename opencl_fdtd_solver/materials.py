@@ -54,3 +54,38 @@ def yee_edge_ce(
         (scale / eps_y).astype(dt_t),
         (scale / eps_z).astype(dt_t),
     )
+
+
+def yee_edge_ca_cb(
+    eps_r: np.ndarray, sigma: np.ndarray, dt: float, dtype=np.float32
+) -> tuple[
+    tuple[np.ndarray, np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray, np.ndarray]
+]:
+    """
+    Per-component lossy-medium E-update coefficients at Yee edges, standard
+    semi-implicit (trapezoidal) loss term (Taflove & Hagness):
+
+        E^{n+1} = Ca*E^n + Cb*(dt/dl)*curl(H)
+        Ca = (1 - sigma*dt/(2*eps0*eps_r)) / (1 + sigma*dt/(2*eps0*eps_r))
+        Cb = (dt/(eps0*eps_r)) / (1 + sigma*dt/(2*eps0*eps_r))
+
+    ``sigma=0`` everywhere recovers ``Ca=1``, ``Cb=yee_edge_ce(eps_r, dt)``
+    exactly (the old lossless update). Returns ``((ca_x, ca_y, ca_z), (cb_x,
+    cb_y, cb_z))``.
+    """
+    eps_x, eps_y, eps_z = yee_edge_eps(eps_r)
+    sig_x, sig_y, sig_z = yee_edge_eps(sigma)
+    dt_f = float(dt)
+    dt_t = np.dtype(dtype)
+
+    def _ca_cb(eps_e: np.ndarray, sig_e: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        loss = sig_e * dt_f / (2.0 * EPS0 * eps_e)
+        denom = 1.0 + loss
+        ca = (1.0 - loss) / denom
+        cb = (dt_f / (EPS0 * eps_e)) / denom
+        return ca.astype(dt_t), cb.astype(dt_t)
+
+    ca_x, cb_x = _ca_cb(eps_x, sig_x)
+    ca_y, cb_y = _ca_cb(eps_y, sig_y)
+    ca_z, cb_z = _ca_cb(eps_z, sig_z)
+    return (ca_x, ca_y, ca_z), (cb_x, cb_y, cb_z)

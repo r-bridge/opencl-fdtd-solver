@@ -121,7 +121,10 @@ __kernel void update_E_interior(
     int Nx, int Ny, int Nz,
     int npml,
     real inv_dl,
-    __global const real * restrict ce_x,  /* dt/(eps0*eps_r) at Ex edges */
+    __global const real * restrict ca_x,  /* lossy decay coeff at Ex edges (1.0 = lossless) */
+    __global const real * restrict ca_y,
+    __global const real * restrict ca_z,
+    __global const real * restrict ce_x,  /* dt/(eps0*eps_r) at Ex edges (loss-scaled if sigma set) */
     __global const real * restrict ce_y,
     __global const real * restrict ce_z,
     __global const real * restrict Hx,
@@ -146,15 +149,18 @@ __kernel void update_E_interior(
     real dHy_dx = Hy[idx] - Hy[idx - Ny * Nz];
     real dHx_dy = Hx[idx] - Hx[idx - Nz];
 
-    Ex[idx] += ce_x[idx] * inv_dl * (dHz_dy - dHy_dz);
-    Ey[idx] += ce_y[idx] * inv_dl * (dHx_dz - dHz_dx);
-    Ez[idx] += ce_z[idx] * inv_dl * (dHy_dx - dHx_dy);
+    Ex[idx] = ca_x[idx] * Ex[idx] + ce_x[idx] * inv_dl * (dHz_dy - dHy_dz);
+    Ey[idx] = ca_y[idx] * Ey[idx] + ce_y[idx] * inv_dl * (dHx_dz - dHz_dx);
+    Ez[idx] = ca_z[idx] * Ez[idx] + ce_z[idx] * inv_dl * (dHy_dx - dHx_dy);
 }
 
 __kernel void update_E_pml(
     int Nx, int Ny, int Nz,
     int npml,
-    __global const real * restrict ce_x,  /* dt/(eps0*eps_r) at Ex edges */
+    __global const real * restrict ca_x,  /* lossy decay coeff at Ex edges (1.0 = lossless) */
+    __global const real * restrict ca_y,
+    __global const real * restrict ca_z,
+    __global const real * restrict ce_x,  /* dt/(eps0*eps_r) at Ex edges (loss-scaled if sigma set) */
     __global const real * restrict ce_y,
     __global const real * restrict ce_z,
     __global const real * restrict Hx,
@@ -226,7 +232,7 @@ __kernel void update_E_pml(
         psi_Ey_z[zi] = p_Ey_z;
     }
 
-    Ex[idx] += ce_x[idx] * (dHz_dy * iky[j] + p_Ex_y - dHy_dz * ikz[k] - p_Ex_z);
-    Ey[idx] += ce_y[idx] * (dHx_dz * ikz[k] + p_Ey_z - dHz_dx * ikx[i] - p_Ey_x);
-    Ez[idx] += ce_z[idx] * (dHy_dx * ikx[i] + p_Ez_x - dHx_dy * iky[j] - p_Ez_y);
+    Ex[idx] = ca_x[idx] * Ex[idx] + ce_x[idx] * (dHz_dy * iky[j] + p_Ex_y - dHy_dz * ikz[k] - p_Ex_z);
+    Ey[idx] = ca_y[idx] * Ey[idx] + ce_y[idx] * (dHx_dz * ikz[k] + p_Ey_z - dHz_dx * ikx[i] - p_Ey_x);
+    Ez[idx] = ca_z[idx] * Ez[idx] + ce_z[idx] * (dHy_dx * ikx[i] + p_Ez_x - dHx_dy * iky[j] - p_Ez_y);
 }

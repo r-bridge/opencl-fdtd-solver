@@ -26,7 +26,7 @@ import pyopencl as cl
 from .constants import C0, EPS0, MU0
 from .cpml import build_cpml_profiles
 from .kernels import load_kernel_source
-from .materials import yee_edge_ce
+from .materials import yee_edge_ca_cb, yee_edge_ce
 from .plugin import SourceMonitorMixin
 
 # Reuse one context/queue for default OpenCLFDTD construction. Creating a new
@@ -180,10 +180,16 @@ class OpenCLFDTD(SourceMonitorMixin):
         self.ce_z_buf = cl.Buffer(self.ctx, mf.READ_WRITE, nbytes)
         # Alias: Ex / Jx sources use the Ex-edge coefficient.
         self.ce_buf = self.ce_x_buf
+        # Lossy-medium decay coefficient (see materials.yee_edge_ca_cb); 1.0
+        # everywhere = lossless (old behavior) until set_epsilon(..., sigma=).
+        self.ca_x_buf = cl.Buffer(self.ctx, mf.READ_WRITE, nbytes)
+        self.ca_y_buf = cl.Buffer(self.ctx, mf.READ_WRITE, nbytes)
+        self.ca_z_buf = cl.Buffer(self.ctx, mf.READ_WRITE, nbytes)
 
         # Initialize GPU buffers to default values (fields=0, eps_r=1)
         zeros = np.zeros(self.size, dtype=self.dtype)
         ce_vac = np.full(self.size, self.dt / EPS0, dtype=self.dtype)
+        ca_lossless = np.ones(self.size, dtype=self.dtype)
         cl.enqueue_copy(self.queue, self.Ex_buf, zeros)
         cl.enqueue_copy(self.queue, self.Ey_buf, zeros)
         cl.enqueue_copy(self.queue, self.Ez_buf, zeros)
@@ -193,6 +199,9 @@ class OpenCLFDTD(SourceMonitorMixin):
         cl.enqueue_copy(self.queue, self.ce_x_buf, ce_vac)
         cl.enqueue_copy(self.queue, self.ce_y_buf, ce_vac)
         cl.enqueue_copy(self.queue, self.ce_z_buf, ce_vac)
+        cl.enqueue_copy(self.queue, self.ca_x_buf, ca_lossless)
+        cl.enqueue_copy(self.queue, self.ca_y_buf, ca_lossless)
+        cl.enqueue_copy(self.queue, self.ca_z_buf, ca_lossless)
 
         self._sources = []
         self._monitors = []
@@ -200,17 +209,49 @@ class OpenCLFDTD(SourceMonitorMixin):
         self._build_cpml()
         self._compile_kernels()
 
-    def set_epsilon(self, eps_array):
-        """Set cell-centered ``εᵣ``; store Yee-edge ``ce = dt/(ε₀ εᵣ)`` on the GPU."""
+    def set_epsilon(self, eps_array, sigma_array=None):
+        """
+        Set cell-centered ``εᵣ`` (and optionally conductivity ``σ`` [S/m]);
+        store Yee-edge lossy-update coefficients ``ca``, ``ce=cb`` on the GPU.
+
+        ``sigma_array=None`` (default) is the old lossless path: ``ca=1``,
+        ``ce = dt/(ε₀ εᵣ)`` exactly as before. Pass ``sigma_array`` (same
+        shape as ``eps_array``, S/m) to add ohmic loss — see
+        ``materials.yee_edge_ca_cb`` for the update equation. This is how a
+        real (non-PEC) reflector should be modeled: a lossy conductor with a
+        resolvable skin depth, rather than a very high lossless εᵣ, whose
+        reflectivity requires resolving a correspondingly short *internal
+        wavelength* (a much stiffer grid requirement than skin depth for the
+        same reflectivity).
+        """
         expected = (self.Nx, self.Ny, self.Nz)
         if eps_array.shape != expected:
             raise ValueError(
                 f"Epsilon shape mismatch: expected {expected}, got {tuple(eps_array.shape)}"
             )
-        ce_x, ce_y, ce_z = yee_edge_ce(eps_array, self.dt, dtype=self.dtype)
-        cl.enqueue_copy(self.queue, self.ce_x_buf, ce_x.ravel())
-        cl.enqueue_copy(self.queue, self.ce_y_buf, ce_y.ravel())
-        cl.enqueue_copy(self.queue, self.ce_z_buf, ce_z.ravel())
+        if sigma_array is None:
+            ce_x, ce_y, ce_z = yee_edge_ce(eps_array, self.dt, dtype=self.dtype)
+            cl.enqueue_copy(self.queue, self.ce_x_buf, ce_x.ravel())
+            cl.enqueue_copy(self.queue, self.ce_y_buf, ce_y.ravel())
+            cl.enqueue_copy(self.queue, self.ce_z_buf, ce_z.ravel())
+            ca_lossless = np.ones(self.size, dtype=self.dtype)
+            cl.enqueue_copy(self.queue, self.ca_x_buf, ca_lossless)
+            cl.enqueue_copy(self.queue, self.ca_y_buf, ca_lossless)
+            cl.enqueue_copy(self.queue, self.ca_z_buf, ca_lossless)
+            return
+        if sigma_array.shape != expected:
+            raise ValueError(
+                f"Sigma shape mismatch: expected {expected}, got {tuple(sigma_array.shape)}"
+            )
+        (ca_x, ca_y, ca_z), (cb_x, cb_y, cb_z) = yee_edge_ca_cb(
+            eps_array, sigma_array, self.dt, dtype=self.dtype
+        )
+        cl.enqueue_copy(self.queue, self.ce_x_buf, cb_x.ravel())
+        cl.enqueue_copy(self.queue, self.ce_y_buf, cb_y.ravel())
+        cl.enqueue_copy(self.queue, self.ce_z_buf, cb_z.ravel())
+        cl.enqueue_copy(self.queue, self.ca_x_buf, ca_x.ravel())
+        cl.enqueue_copy(self.queue, self.ca_y_buf, ca_y.ravel())
+        cl.enqueue_copy(self.queue, self.ca_z_buf, ca_z.ravel())
 
     def _build_cpml(self):
         """Calculate CPML coefficients and allocate face-local psi buffers on the GPU."""
@@ -592,6 +633,7 @@ class OpenCLFDTD(SourceMonitorMixin):
         npml = np.int32(self.npml)
         inv_dl = self.real(1.0 / self.dl)
         ce = (self.ce_x_buf, self.ce_y_buf, self.ce_z_buf)
+        ca = (self.ca_x_buf, self.ca_y_buf, self.ca_z_buf)
 
         if self.npml > 0:
             if self._gs_interior is not None:
@@ -604,6 +646,7 @@ class OpenCLFDTD(SourceMonitorMixin):
                     nz,
                     npml,
                     inv_dl,
+                    *ca,
                     *ce,
                     self.Hx_buf,
                     self.Hy_buf,
@@ -620,6 +663,7 @@ class OpenCLFDTD(SourceMonitorMixin):
                 ny,
                 nz,
                 npml,
+                *ca,
                 *ce,
                 self.Hx_buf,
                 self.Hy_buf,
@@ -652,6 +696,7 @@ class OpenCLFDTD(SourceMonitorMixin):
                 ny,
                 nz,
                 np.int32(0),
+                *ca,
                 *ce,
                 self.Hx_buf,
                 self.Hy_buf,
