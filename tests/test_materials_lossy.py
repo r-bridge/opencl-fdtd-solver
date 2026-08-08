@@ -8,7 +8,6 @@ from __future__ import annotations
 import unittest
 
 import numpy as np
-
 from opencl_fdtd_solver import OpenCLFDTD
 from opencl_fdtd_solver.constants import EPS0
 from opencl_fdtd_solver.materials import yee_edge_ca_cb, yee_edge_ce
@@ -49,8 +48,7 @@ class TestYeeEdgeCaCb(unittest.TestCase):
 
     def test_high_loss_ca_goes_negative_but_bounded(self):
         """Per-step loss > 1 gives Ca<0 (sign-flipping decay) but must stay in (-1, 1] --
-        the scheme is unconditionally stable even though it's inaccurate in this regime
-        (see fdtd_lib.scene_check's per-step-loss warning in the fdtd-studio repo)."""
+        the scheme is unconditionally stable even though it's inaccurate in this regime."""
         eps = np.ones((2, 2, 2), dtype=np.float64)
         for sigma_val in (100.0, 1000.0, 1e6):
             sigma = np.full_like(eps, sigma_val)
@@ -116,7 +114,8 @@ class TestLossyConductorEngine(unittest.TestCase):
             probe_inside.append(abs(ex[12, 12, 55]))
 
         self.assertEqual(
-            probe_before, sorted(probe_before),
+            probe_before,
+            sorted(probe_before),
             f"reflection buildup before the slab should increase with sigma: {probe_before}",
         )
         # Attenuation strengthens (deep-slab amplitude shrinks) monotonically too.

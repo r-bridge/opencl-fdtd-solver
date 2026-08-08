@@ -58,9 +58,7 @@ def yee_edge_ce(
 
 def yee_edge_ca_cb(
     eps_r: np.ndarray, sigma: np.ndarray, dt: float, dtype=np.float32
-) -> tuple[
-    tuple[np.ndarray, np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray, np.ndarray]
-]:
+) -> tuple[tuple[np.ndarray, np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """
     Per-component lossy-medium E-update coefficients at Yee edges, standard
     semi-implicit (trapezoidal) loss term (Taflove & Hagness):
