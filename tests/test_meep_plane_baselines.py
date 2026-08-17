@@ -27,7 +27,11 @@ from tests.meep_validation.plane_metrics import (
     discrepancy_markdown,
     measure_case,
 )
-from tests.meep_validation.plane_render import read_png_rgb, write_triptych_png
+from tests.meep_validation.plane_render import (
+    png_matches,
+    read_png_rgb,
+    write_triptych_png,
+)
 
 
 def _require_meep():
@@ -121,12 +125,12 @@ class TestMeepPlaneBaselines(unittest.TestCase):
                         write_triptych_png(actual_path, ocl[step], meep[step])
                         expected = read_png_rgb(baseline)
                         actual = read_png_rgb(actual_path)
-                    if not np.array_equal(expected, actual):
-                        diff = np.abs(expected.astype(np.int16) - actual.astype(np.int16))
+                    ok, max_d, mean_d = png_matches(expected, actual)
+                    if not ok:
                         raise AssertionError(
                             f"{case.name} step {step}: PNG pixels differ from "
-                            f"baseline (max|Δ|={int(diff.max())}, "
-                            f"mean|Δ|={float(diff.mean()):.3f}). "
+                            f"baseline beyond colormap-quantization tolerance "
+                            f"(max|Δ|={max_d}, mean|Δ|={mean_d:.3f}). "
                             "Refresh with:\n"
                             "  IGNORE_GPU=NVIDIA,AMD PYOPENCL_CTX=0 python -m "
                             "tests.meep_validation.update_plane_baselines"

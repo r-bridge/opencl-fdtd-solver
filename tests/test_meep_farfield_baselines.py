@@ -25,7 +25,11 @@ from tests.meep_validation.farfield_metrics import (
     discrepancy_farfield_markdown,
     measure_farfield_case,
 )
-from tests.meep_validation.farfield_render import read_png_rgb, write_pattern_overlay_png
+from tests.meep_validation.farfield_render import (
+    png_matches,
+    read_png_rgb,
+    write_pattern_overlay_png,
+)
 from tests.meep_validation.harness import OPENCL_COURANT, MeepUnavailableError, max_abs_db_error
 from tests.meep_validation.plane_cases import baselines_root
 
@@ -146,11 +150,12 @@ class TestMeepFarfieldBaselines(unittest.TestCase):
                     )
                     expected = read_png_rgb(baseline)
                     actual = read_png_rgb(actual_path)
-                if not np.array_equal(expected, actual):
-                    diff = np.abs(expected.astype(np.int16) - actual.astype(np.int16))
+                ok, max_d, mean_d = png_matches(expected, actual)
+                if not ok:
                     raise AssertionError(
-                        f"{case.name}: PNG pixels differ from baseline "
-                        f"(max|Δ|={int(diff.max())}, mean|Δ|={float(diff.mean()):.3f}). "
+                        f"{case.name}: PNG pixels differ from baseline beyond "
+                        f"colormap-quantization tolerance "
+                        f"(max|Δ|={max_d}, mean|Δ|={mean_d:.3f}). "
                         "Refresh with:\n"
                         "  IGNORE_GPU=NVIDIA,AMD PYOPENCL_CTX=0 python -m "
                         "tests.meep_validation.update_farfield_baselines"

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .plane_render import read_png_rgb  # re-export for tests
+from .plane_render import png_matches, read_png_rgb  # re-exports for tests
 
 
 def _peak_align_db(db: np.ndarray) -> np.ndarray:
@@ -96,4 +96,5 @@ __all__ = [
     "compose_pattern_overlay",
     "write_pattern_overlay_png",
     "read_png_rgb",
+    "png_matches",
 ]

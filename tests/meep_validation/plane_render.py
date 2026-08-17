@@ -93,3 +93,30 @@ def read_png_rgb(path: str | Path) -> np.ndarray:
             img = img[..., :3]
         arr = img
     return arr
+
+
+# Rendered PNGs quantize float fields through a colormap, so a ULP-level
+# difference in the underlying solve (POCL on CI vs a GPU backend locally) can
+# push a pixel across a quantization boundary -- and the residual panel, being
+# a near-cancelling difference rescaled by its own percentile, is the most
+# sensitive of all. The arrays themselves are compared numerically by the
+# baseline tests; these gates keep the PNG check honest about what it is for
+# (layout / colormap / orientation regressions, which move pixels far more).
+PNG_MAX_ABS_DELTA = 8
+PNG_MEAN_ABS_DELTA = 1.0
+
+
+def png_delta(expected: np.ndarray, actual: np.ndarray) -> tuple[int, float]:
+    """Return (max|Δ|, mean|Δ|) over two HxWx3 uint8 images."""
+    if expected.shape != actual.shape:
+        raise ValueError(f"PNG shape mismatch: {expected.shape} vs {actual.shape}")
+    diff = np.abs(expected.astype(np.int16) - actual.astype(np.int16))
+    return int(diff.max()), float(diff.mean())
+
+
+def png_matches(expected: np.ndarray, actual: np.ndarray) -> tuple[bool, int, float]:
+    """Return (ok, max|Δ|, mean|Δ|); ok when within quantization tolerance."""
+    if expected.shape != actual.shape:
+        return False, 255, 255.0
+    max_d, mean_d = png_delta(expected, actual)
+    return (max_d <= PNG_MAX_ABS_DELTA and mean_d <= PNG_MEAN_ABS_DELTA), max_d, mean_d
