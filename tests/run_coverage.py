@@ -30,6 +30,7 @@ SUITES = [
     "tests.test_materials_lossy",
     "tests.test_analytic_validation",
     "tests.test_api_docs",
+    "tests.test_correctness_regressions",
 ]
 
 

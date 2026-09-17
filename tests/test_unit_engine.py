@@ -98,7 +98,7 @@ class TestMemoryEstimate(unittest.TestCase):
     def test_fields_only_when_npml_zero(self):
         shape = (40, 50, 60)
         item = 4
-        expected = 9 * 40 * 50 * 60 * item
+        expected = (12 * 40 * 50 * 60 + 6 * (40 + 50 + 60) + 12) * item
         self.assertEqual(
             OpenCLFDTD.estimate_device_memory_bytes(shape, npml=0),
             expected,
@@ -107,7 +107,7 @@ class TestMemoryEstimate(unittest.TestCase):
     def test_includes_face_local_psi(self):
         shape = (100, 100, 100)
         npml = 10
-        fields = 9 * 100**3 * 4
+        fields = (12 * 100**3 + 6 * 300) * 4
         psi = (
             4 * (2 * npml * 100 * 100) + 4 * (100 * 2 * npml * 100) + 4 * (100 * 100 * 2 * npml)
         ) * 4

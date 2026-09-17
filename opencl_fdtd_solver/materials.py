@@ -63,7 +63,7 @@ def yee_edge_ca_cb(
     Per-component lossy-medium E-update coefficients at Yee edges, standard
     semi-implicit (trapezoidal) loss term (Taflove & Hagness):
 
-        E^{n+1} = Ca*E^n + Cb*(dt/dl)*curl(H)
+        E^{n+1} = Ca*E^n + Cb*(curl(H) - J)
         Ca = (1 - sigma*dt/(2*eps0*eps_r)) / (1 + sigma*dt/(2*eps0*eps_r))
         Cb = (dt/(eps0*eps_r)) / (1 + sigma*dt/(2*eps0*eps_r))
 

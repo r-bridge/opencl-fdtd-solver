@@ -20,6 +20,7 @@ import unittest
 
 import numpy as np
 from opencl_fdtd_solver import (
+    ETA0,
     NumPyFDTD,
     NumPyFDTD_FaceCPML,
     NumPyNear2FarMonitor,
@@ -127,17 +128,20 @@ class TestGenericFDTDSolver(unittest.TestCase):
         fdtd.run(80)
 
         obs_list = [
-            (0.0, 0.0, 1000.0),
-            (1000.0, 0.0, 0.0),
-            (707.1, 0.0, 707.1),
+            (0.0, 0.0, 1.0),
+            (1.0, 0.0, 0.0),
+            (0.7071, 0.0, 0.7071),
         ]
+        peak_e = max(np.linalg.norm(np_mon.get_farfield(p)[:3]) for p in obs_list)
         for obs in obs_list:
             ff_np = np_mon.get_farfield(obs)
             ff_cl = cl_mon.get_farfield(obs)
-            diff = np.max(np.abs(ff_np - ff_cl))
             self.assertGreater(np.max(np.abs(ff_cl)), 0.0, f"OpenCL far-field at {obs} is zero")
-            # Face-packed NumPy and OpenCL paths should now agree closely.
-            self.assertLess(diff, 5e-4, f"Far-field mismatch at {obs}: {diff:.6e}")
+            # Scale H to E units; tolerate only a small fraction of the peak,
+            # including near-null observations where relative error is undefined.
+            scale = np.array([1, 1, 1, ETA0, ETA0, ETA0])
+            error = np.linalg.norm((ff_np - ff_cl) * scale) / peak_e
+            self.assertLess(error, 2e-4, f"Relative far-field mismatch at {obs}: {error:.6e}")
 
         # Face-only download is much smaller than a full volume.
         n_cells = self.shape[0] * self.shape[1] * self.shape[2]

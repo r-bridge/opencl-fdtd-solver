@@ -23,6 +23,7 @@ import warnings
 import numpy as np
 import pyopencl as cl
 
+from ._validation import sheet_current, source_sheet, validate_grid
 from .constants import C0, EPS0, MU0
 from .cpml import build_cpml_profiles
 from .kernels import load_kernel_source
@@ -60,8 +61,15 @@ def _default_opencl_runtime():
 
     gpus = []
     cpus = []
+    all_devices = []
     for p in platforms:
-        for d in p.get_devices():
+        try:
+            platform_devices = p.get_devices()
+        except cl.Error as exc:
+            logging.getLogger(__name__).warning("Skipping OpenCL platform %s: %s", p.name, exc)
+            continue
+        all_devices.extend(platform_devices)
+        for d in platform_devices:
             if _ignored(d):
                 continue
             if d.type & cl.device_type.GPU:
@@ -71,8 +79,7 @@ def _default_opencl_runtime():
     devices = gpus or cpus
     if not devices:
         # Fall back to any device if IGNORE_GPU filtered everything (local GPU-only hosts).
-        for p in platforms:
-            devices.extend(p.get_devices())
+        devices = all_devices
     if not devices:
         raise RuntimeError("No OpenCL devices found.")
 
@@ -115,9 +122,8 @@ class OpenCLFDTD(SourceMonitorMixin):
             you want to rule out DFT/near-to-far accumulation round-off
             without doubling the whole grid's memory footprint.
         """
+        shape, self.dl, self.npml = validate_grid(shape, dl, npml)
         self.Nx, self.Ny, self.Nz = shape
-        self.dl = float(dl)
-        self.npml = int(npml)
         dtype = np.dtype(dtype)
         if dtype not in (np.dtype(np.float32), np.dtype(np.float64)):
             raise ValueError(f"OpenCLFDTD supports float32 or float64 computation; got {dtype!r}")
@@ -135,7 +141,7 @@ class OpenCLFDTD(SourceMonitorMixin):
         self.step_num = 0
 
         # Courant-stable time step
-        self.dt = 0.99 * dl / (C0 * np.sqrt(3.0))
+        self.dt = 0.99 * self.dl / (C0 * np.sqrt(3.0))
 
         # Setup OpenCL context and queue
         if ctx is None:
@@ -298,7 +304,7 @@ class OpenCLFDTD(SourceMonitorMixin):
         def _psi_buf(n):
             if n == 0:
                 # Tiny placeholder so kernel args remain valid if ever referenced.
-                return cl.Buffer(self.ctx, mf.READ_WRITE, 4)
+                return cl.Buffer(self.ctx, mf.READ_WRITE, self.dtype.itemsize)
             zeros = np.zeros(n, dtype=self.dtype)
             return cl.Buffer(self.ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=zeros)
 
@@ -322,16 +328,16 @@ class OpenCLFDTD(SourceMonitorMixin):
         """Estimated GPU allocation for fields + face-local CPML psi (bytes)."""
         nx, ny, nz = shape
         item = np.dtype(dtype).itemsize
-        fields = 9 * nx * ny * nz * item  # Ex..Hz + ce_x/y/z (Yee-edge coeffs)
+        fields = 12 * nx * ny * nz * item  # Ex..Hz + ce_x/y/z + ca_x/y/z
+        profiles = 6 * (nx + ny + nz) * item  # b, c, 1/(kappa*dl), E/H staggers
         if npml <= 0:
-            return fields
+            return fields + profiles + 12 * item  # placeholder psi buffers
         psi = (
             4 * (2 * npml * ny * nz)  # x-faces
             + 4 * (nx * 2 * npml * nz)  # y-faces
             + 4 * (nx * ny * 2 * npml)  # z-faces
         ) * item
-        # 1D CPML coeff arrays are negligible
-        return fields + psi
+        return fields + profiles + psi
 
     @classmethod
     def device_memory_budget_bytes(cls, device):
@@ -459,10 +465,9 @@ class OpenCLFDTD(SourceMonitorMixin):
             DeprecationWarning,
             stacklevel=2,
         )
-        i0_i = 0 if i0 is None else int(i0)
-        i1_i = self.Nx if i1 is None else int(i1)
-        j0_i = 0 if j0 is None else int(j0)
-        j1_i = self.Ny if j1 is None else int(j1)
+        z_src, i0_i, i1_i, j0_i, j1_i = source_sheet(
+            (self.Nx, self.Ny, self.Nz), z_src, i0, i1, j0, j1
+        )
         self.kern_add_source_Ex(
             self.queue,
             (self.Ny, self.Nx),
@@ -505,20 +510,11 @@ class OpenCLFDTD(SourceMonitorMixin):
         cases. With ``rim_renorm`` (default true), ``Jx`` is scaled so ∑weights
         equals the hard cell count (preserves net ∫J).
         """
-        i0_i = 0 if i0 is None else int(i0)
-        i1_i = self.Nx if i1 is None else int(i1)
-        j0_i = 0 if j0 is None else int(j0)
-        j1_i = self.Ny if j1 is None else int(j1)
-        jx = float(Jx)
-        re = float(rim_edge)
-        if rim_taper and rim_renorm:
-            nx_s = max(0, i1_i - i0_i)
-            ny_s = max(0, j1_i - j0_i)
-            if nx_s >= 2 and ny_s >= 2:
-                ni, nj = nx_s - 2, ny_s - 2
-                wsum = ni * nj + re * (2 * ni + 2 * nj) + (re * re) * 4
-                jx *= (nx_s * ny_s) / wsum
-        self.kern_add_source_Jx(
+        z_src, i0_i, i1_i, j0_i, j1_i = source_sheet(
+            (self.Nx, self.Ny, self.Nz), z_src, i0, i1, j0, j1
+        )
+        jx, re = sheet_current(Jx, i1_i - i0_i, j1_i - j0_i, rim_taper, rim_edge, rim_renorm)
+        args = (
             self.queue,
             (self.Ny, self.Nx),
             None,
@@ -536,6 +532,7 @@ class OpenCLFDTD(SourceMonitorMixin):
             self.ce_buf,
             self.Ex_buf,
         )
+        self._inject_current(lambda: self.kern_add_source_Jx(*args))
 
     def _update_H(self):
         nx, ny, nz = np.int32(self.Nx), np.int32(self.Ny), np.int32(self.Nz)
@@ -723,14 +720,7 @@ class OpenCLFDTD(SourceMonitorMixin):
 
     def step(self):
         """Single timestep Yee-update with sources and monitors."""
-        self._update_H()
-        # Soft currents belong at (n+1/2)Δt in the leapfrog E update.
-        t_int = self.t
-        self.t = t_int + 0.5 * self.dt
-        for src in self._sources:
-            src(self)
-        self.t = t_int
-        self._update_E()
+        self._step_fields()
         self.t += self.dt
         self.step_num += 1
         for mon in self._monitors:

@@ -99,7 +99,7 @@ class Near2FarBase:
                 xp = i * dl
                 yp = (jg + 0.5) * dl
                 zp = (kg + 0.5) * dl
-                phase_factor = np.exp(1j * k * (rx * xp + ry * yp + rz * zp))
+                phase_factor = np.exp(-1j * k * (rx * xp + ry * yp + rz * zp))
 
                 J_y = n * self.Hz_dft[i, iy0 : iy1 + 1, iz0 : iz1 + 1]
                 J_z = -n * self.Hy_dft[i, iy0 : iy1 + 1, iz0 : iz1 + 1]
@@ -123,7 +123,7 @@ class Near2FarBase:
                 xp = (ig + 0.5) * dl
                 yp = j * dl
                 zp = (kg + 0.5) * dl
-                phase_factor = np.exp(1j * k * (rx * xp + ry * yp + rz * zp))
+                phase_factor = np.exp(-1j * k * (rx * xp + ry * yp + rz * zp))
 
                 J_x = -n * self.Hz_dft[ix0 : ix1 + 1, j, iz0 : iz1 + 1]
                 J_z = n * self.Hx_dft[ix0 : ix1 + 1, j, iz0 : iz1 + 1]
@@ -147,7 +147,7 @@ class Near2FarBase:
                 xp = (ig + 0.5) * dl
                 yp = (jg + 0.5) * dl
                 zp = kk * dl
-                phase_factor = np.exp(1j * k * (rx * xp + ry * yp + rz * zp))
+                phase_factor = np.exp(-1j * k * (rx * xp + ry * yp + rz * zp))
 
                 J_x = n * self.Hy_dft[ix0 : ix1 + 1, iy0 : iy1 + 1, kk]
                 J_y = -n * self.Hx_dft[ix0 : ix1 + 1, iy0 : iy1 + 1, kk]
@@ -159,7 +159,7 @@ class Near2FarBase:
                 Lx_int += np.sum(M_x * phase_factor * w) * dA
                 Ly_int += np.sum(M_y * phase_factor * w) * dA
 
-        prefactor = -1j * k / (4.0 * np.pi * r) * np.exp(-1j * k * r)
+        prefactor = -1j * k / (4.0 * np.pi * r) * np.exp(1j * k * r)
         N = np.array([Nx_int, Ny_int, Nz_int])
         L = np.array([Lx_int, Ly_int, Lz_int])
         rhat = np.array([rx, ry, rz])
@@ -167,9 +167,8 @@ class Near2FarBase:
         rxL = np.cross(rhat, L)
         N_t = N - np.dot(rhat, N) * rhat
 
-        # E ∝ η N_⊥ + r̂×L   (Balanis / Taflove far-field equivalence)
-        E_far = prefactor * (ETA0 * N_t + rxL)
-        H_far = -np.cross(rhat, E_far) / ETA0
+        E_far = prefactor * (ETA0 * N_t - rxL)
+        H_far = np.cross(rhat, E_far) / ETA0
 
         return np.array(
             [
@@ -209,7 +208,10 @@ class NumPyNear2FarMonitor(Near2FarBase):
             offs.append(offs[-1] + c)
         self._face_offsets = tuple(offs)
         self.n_face_samples = int(sum(self._face_counts))
-        z = np.zeros(self.n_face_samples, dtype=np.complex64)
+        complex_dtype = getattr(
+            fdtd, "accreal_complex_dtype", np.result_type(fdtd.dtype, np.complex64)
+        )
+        z = np.zeros(self.n_face_samples, dtype=complex_dtype)
         self.Ex_dft_f = z.copy()
         self.Ey_dft_f = z.copy()
         self.Ez_dft_f = z.copy()
@@ -218,12 +220,12 @@ class NumPyNear2FarMonitor(Near2FarBase):
         self.Hz_dft_f = z.copy()
         # Volume placeholders so Near2FarBase.Ex_dft is non-None after a run.
         shape = (fdtd.Nx, fdtd.Ny, fdtd.Nz)
-        self.Ex_dft = np.zeros(shape, dtype=np.complex64)
-        self.Ey_dft = np.zeros(shape, dtype=np.complex64)
-        self.Ez_dft = np.zeros(shape, dtype=np.complex64)
-        self.Hx_dft = np.zeros(shape, dtype=np.complex64)
-        self.Hy_dft = np.zeros(shape, dtype=np.complex64)
-        self.Hz_dft = np.zeros(shape, dtype=np.complex64)
+        self.Ex_dft = np.zeros(shape, dtype=complex_dtype)
+        self.Ey_dft = np.zeros(shape, dtype=complex_dtype)
+        self.Ez_dft = np.zeros(shape, dtype=complex_dtype)
+        self.Hx_dft = np.zeros(shape, dtype=complex_dtype)
+        self.Hy_dft = np.zeros(shape, dtype=complex_dtype)
+        self.Hz_dft = np.zeros(shape, dtype=complex_dtype)
         fdtd.add_monitor(self)
 
     def __call__(self, fdtd):
@@ -319,7 +321,7 @@ class NumPyNear2FarMonitor(Near2FarBase):
                 if kk == iz0 or kk == iz1:
                     w *= 0.5
                 xp, yp, zp = i * dl, (j + 0.5) * dl, (kk + 0.5) * dl
-                ph = np.exp(1j * k * (rx * xp + ry * yp + rz * zp))
+                ph = np.exp(-1j * k * (rx * xp + ry * yp + rz * zp))
                 fi = off + loc
                 Ny_int += nf * self.Hz_dft_f[fi] * ph * dA * w
                 Nz_int += -nf * self.Hy_dft_f[fi] * ph * dA * w
@@ -337,7 +339,7 @@ class NumPyNear2FarMonitor(Near2FarBase):
                 if kk == iz0 or kk == iz1:
                     w *= 0.5
                 xp, yp, zp = (i + 0.5) * dl, j * dl, (kk + 0.5) * dl
-                ph = np.exp(1j * k * (rx * xp + ry * yp + rz * zp))
+                ph = np.exp(-1j * k * (rx * xp + ry * yp + rz * zp))
                 fi = off + loc
                 Nx_int += -nf * self.Hz_dft_f[fi] * ph * dA * w
                 Nz_int += nf * self.Hx_dft_f[fi] * ph * dA * w
@@ -355,7 +357,7 @@ class NumPyNear2FarMonitor(Near2FarBase):
                 if j == iy0 or j == iy1:
                     w *= 0.5
                 xp, yp, zp = (i + 0.5) * dl, (j + 0.5) * dl, kk * dl
-                ph = np.exp(1j * k * (rx * xp + ry * yp + rz * zp))
+                ph = np.exp(-1j * k * (rx * xp + ry * yp + rz * zp))
                 fi = off + loc
                 Nx_int += nf * self.Hy_dft_f[fi] * ph * dA * w
                 Ny_int += -nf * self.Hx_dft_f[fi] * ph * dA * w
@@ -369,14 +371,14 @@ class NumPyNear2FarMonitor(Near2FarBase):
         _acc_z(iz0, o4, -1.0)
         _acc_z(iz1, o5, +1.0)
 
-        prefactor = -1j * k / (4.0 * np.pi * r) * np.exp(-1j * k * r)
+        prefactor = -1j * k / (4.0 * np.pi * r) * np.exp(1j * k * r)
         N = np.array([Nx_int, Ny_int, Nz_int])
         L = np.array([Lx_int, Ly_int, Lz_int])
         rhat = np.array([rx, ry, rz])
         rxL = np.cross(rhat, L)
         N_t = N - np.dot(rhat, N) * rhat
-        E_far = prefactor * (ETA0 * N_t + rxL)
-        H_far = -np.cross(rhat, E_far) / ETA0
+        E_far = prefactor * (ETA0 * N_t - rxL)
+        H_far = np.cross(rhat, E_far) / ETA0
         return np.array([E_far[0], E_far[1], E_far[2], H_far[0], H_far[1], H_far[2]])
 
 
@@ -824,4 +826,4 @@ def _poynting_db(ff) -> tuple[float, float]:
     mag = _poynting_mag(ff)
     if not np.isfinite(mag) or mag <= 0.0:
         return float("-inf"), 0.0
-    return float(20.0 * np.log10(mag)), mag
+    return float(10.0 * np.log10(mag)), mag

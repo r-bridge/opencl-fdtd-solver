@@ -29,6 +29,30 @@ class SourceMonitorMixin:
 
     _sources: list
     _monitors: list
+    _pending_currents = None
+
+    def _inject_current(self, injection):
+        if self._pending_currents is None:
+            injection()
+        else:
+            self._pending_currents.append(injection)
+
+    def _step_fields(self):
+        """Keep callback timing while adding J after decay of the old E field."""
+        self._update_H()
+        t_int = self.t
+        self._pending_currents = []
+        try:
+            self.t = t_int + 0.5 * self.dt
+            for src in self._sources:
+                src(self)
+        finally:
+            self.t = t_int
+            currents = self._pending_currents
+            self._pending_currents = None
+        self._update_E()
+        for injection in currents:
+            injection()
 
     def add_source(self, source: StepCallback) -> StepCallback:
         """Register a source callback ``source(fdtd)`` after each H update."""

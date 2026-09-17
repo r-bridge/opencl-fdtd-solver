@@ -426,7 +426,7 @@ inline void face_sample_NL(
     }
     int li = face_i;
     real phase = k_wave * (rx * xp + ry * yp + rz * zp);
-    accreal2 ph = (accreal2)(cos((accreal)phase), sin((accreal)phase));
+    accreal2 ph = (accreal2)(cos((accreal)phase), -sin((accreal)phase));
 
     /* Trapezoidal face quadrature: half weight on edges, quarter on corners. */
     real wj, wk;
@@ -580,8 +580,8 @@ __kernel void farfield_nl_to_eh(
 
     accreal k_wave_a = (accreal)k_wave, eta0_a = (accreal)eta0;
     accreal ang = k_wave_a * r;
-    // Outgoing wave ~ e^{-j k r}
-    accreal2 eikr = (accreal2)(cos(ang), -sin(ang));
+    // Positive-time DFT: outgoing wave ~ exp(+i k r).
+    accreal2 eikr = (accreal2)(cos(ang), sin(ang));
     accreal scale = k_wave_a / ((accreal)4.0 * (accreal)3.14159265358979323846 * r);
     accreal2 pref = cmul_acc((accreal2)((accreal)0.0, -scale), eikr);
 
@@ -599,31 +599,19 @@ __kernel void farfield_nl_to_eh(
 
     for (int c = 0; c < 3; c++) {
         Nt[c] = (accreal2)(Nvec[c].x - Ndot.x * rhat[c], Nvec[c].y - Ndot.y * rhat[c]);
-        /* Combined N/L far-field formula (Balanis eq. 12-30a/b in vector
-         * form): E = -jk e^{-jkr}/(4 pi r) * [eta*Nt - r_hat x L].
-         * The L term's sign controls the transform's one-sidedness (a
-         * Huygens surface radiates along the wave's propagation direction
-         * and nulls the opposite); with `+ rxL` that selectivity was
-         * INVERTED -- verified three independent ways: (1) a single face
-         * carrying the currents of a +Z-going wave beamed at theta=180
-         * instead of 0; (2) a disk scatterer's forward/shadow lobe (which
-         * physically must be comparable to its reflected lobe -- confirmed
-         * in Meep) came out ~70dB suppressed while the reflected lobe
-         * appeared rotation-independent; (3) after this fix the disk's
-         * rotation response matches Meep/physical-optics. The sphere-based
-         * Meep baselines barely move (outgoing-everywhere radiation is
-         * nearly insensitive to one-sidedness), which is why they never
-         * caught this. */
+        /* Face integrals store H x n and n x E (the negatives of the
+         * conventional equivalent currents). With the +i*omega*t DFT:
+         * E = -ik exp(+ikr)/(4 pi r) * [eta*Nt - r_hat x L]. */
         accreal2 tE = (accreal2)(eta0_a * Nt[c].x - rxL[c].x, eta0_a * Nt[c].y - rxL[c].y);
         E[c] = cmul_acc(pref, tE);
     }
-    // Far-field TEM: H = -r̂ × E / η
-    H[0] = (accreal2)(-(rhat[1] * E[2].x - rhat[2] * E[1].x) / eta0_a,
-                       -(rhat[1] * E[2].y - rhat[2] * E[1].y) / eta0_a);
-    H[1] = (accreal2)(-(rhat[2] * E[0].x - rhat[0] * E[2].x) / eta0_a,
-                       -(rhat[2] * E[0].y - rhat[0] * E[2].y) / eta0_a);
-    H[2] = (accreal2)(-(rhat[0] * E[1].x - rhat[1] * E[0].x) / eta0_a,
-                       -(rhat[0] * E[1].y - rhat[1] * E[0].y) / eta0_a);
+    // Outgoing TEM: H = r̂ × E / η, giving positive radial energy flux.
+    H[0] = (accreal2)((rhat[1] * E[2].x - rhat[2] * E[1].x) / eta0_a,
+                       (rhat[1] * E[2].y - rhat[2] * E[1].y) / eta0_a);
+    H[1] = (accreal2)((rhat[2] * E[0].x - rhat[0] * E[2].x) / eta0_a,
+                       (rhat[2] * E[0].y - rhat[0] * E[2].y) / eta0_a);
+    H[2] = (accreal2)((rhat[0] * E[1].x - rhat[1] * E[0].x) / eta0_a,
+                       (rhat[0] * E[1].y - rhat[1] * E[0].y) / eta0_a);
 
     int o = 6 * p;
     EH_out[o + 0] = E[0];

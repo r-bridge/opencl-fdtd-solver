@@ -128,30 +128,37 @@ class TestAnalyticDispersion(unittest.TestCase):
         os.environ.setdefault("PYOPENCL_CTX", "0")
 
     def test_yee_phase_velocity_1d_like(self):
-        # Propagate a narrowband Ex pulse along +z in a long vacuum guide.
-        nx, ny, nz = 16, 16, 120
-        dl = 1e-3
-        npml = 8
+        # Uniform XY sheets reduce the actual 3-D kernels to a 1-D wave.
+        # Stop before reflections from either outer boundary reach the probes.
         freq = 6e9
-        fdtd = OpenCLFDTD((nx, ny, nz), dl, npml=npml)
-        # Courant number used by the solver.
-        S = float(fdtd.dt * C0 / dl)
-        # Analytic Yee dispersion for propagation along z (Δx=Δy unused → 1D-like):
-        # sin(ωΔt/2) = S * sin(k̃ Δl/2)  →  k̃ from ω.
         omega = 2.0 * np.pi * freq
-        arg = np.sin(0.5 * omega * fdtd.dt) / S
-        self.assertLess(abs(arg), 1.0)
-        k_num = 2.0 / dl * np.arcsin(arg)
-        v_phase_analytic = omega / k_num
-        # Relative error vs c should be small at ~50 cells/λ.
-        cells_per_lambda = C0 / freq / dl
-        self.assertGreater(cells_per_lambda, 40.0)
-        err = abs(v_phase_analytic - C0) / C0
-        self.assertLess(
-            err,
-            0.01,
-            f"Yee |v_p - c|/c = {err:.4e} at {cells_per_lambda:.1f} cells/λ",
-        )
+        errors = []
+        for dl in (2e-3, 1e-3):
+            fdtd = OpenCLFDTD((1, 1, round(0.6 / dl)), dl, npml=0)
+            z_src = round(0.2 / dl)
+            probes = [round(0.23 / dl), round(0.24 / dl)]
+            t0, width = 60 * fdtd.dt, 15 * fdtd.dt
+            fdtd.add_source(
+                lambda f: f.add_source_Jx(
+                    z_src, np.exp(-0.5 * ((f.t - t0) / width) ** 2) * np.sin(omega * f.t)
+                )
+            )
+            dft = np.zeros(2, dtype=complex)
+            for _ in range(350):
+                fdtd.step()
+                dft += (
+                    np.array([fdtd.read_point("Ex", 0, 0, z) for z in probes])
+                    * np.exp(1j * omega * fdtd.t)
+                    * fdtd.dt
+                )
+            self.assertGreater(np.min(np.abs(dft)), 1e-15)
+            measured_k = np.angle(dft[1] / dft[0]) / ((probes[1] - probes[0]) * dl)
+            courant = fdtd.dt * C0 / dl
+            yee_k = 2 / dl * np.arcsin(np.sin(omega * fdtd.dt / 2) / courant)
+            self.assertLess(abs(measured_k / yee_k - 1), 2e-4)
+            errors.append(abs(omega / measured_k / C0 - 1))
+        # Halving dl should reduce the second-order dispersion error by ~4.
+        self.assertLess(errors[1], 0.35 * errors[0])
 
 
 class TestPmlReflection(unittest.TestCase):
@@ -163,7 +170,7 @@ class TestPmlReflection(unittest.TestCase):
 
     @staticmethod
     def _probe_trace(*, nz: int, npml: int, z_src: int, z_probe: int, n_steps: int) -> np.ndarray:
-        nx = ny = 16
+        nx = ny = max(16, 2 * npml + 8)
         dl = 1e-3
         fdtd = OpenCLFDTD((nx, ny, nz), dl, npml=npml)
         t0 = 35.0 * fdtd.dt
