@@ -31,6 +31,7 @@ SUITES = [
     "tests.test_analytic_validation",
     "tests.test_api_docs",
     "tests.test_correctness_regressions",
+    "tests.test_mirror_rcs",
 ]
 
 

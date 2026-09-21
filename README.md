@@ -21,7 +21,7 @@ The mathematical formulations for the Yee-grid field updates and the Convolution
 *   **FP32 / FP64:** Same kernel sources; `OpenCLFDTD(..., dtype=np.float64)` when the device has `cl_khr_fp64` (expect ~2× cost from bandwidth). No separate CUDA engine.
 *   **Pluggable Monitors:** Supports host-side NumPy monitors and GPU-side OpenCL monitors for zero-copy DFT accumulation.
 *   **NumPy Fallback:** Includes a pure NumPy CPU reference implementation (`NumPyFDTD`) for testing, fallback, and benchmarking.
-*   **Cell-wise materials:** Nondispersive scalar εᵣ via `set_epsilon`. Subpixel averaging / geometry meshing is left to the caller (see §6).
+*   **Cell-wise materials:** Nondispersive scalar εᵣ and optional ohmic conductivity on OpenCL via `set_epsilon(eps_array, sigma_array=None)`. Subpixel averaging / geometry meshing is left to the caller (see §6).
 *   **Dependency-Free:** Pure Python package with minimal requirements (no C compiler or toolchains required at install time).
 
 ---
@@ -43,15 +43,18 @@ from opencl_fdtd_solver import OpenCLFDTD
 sim = OpenCLFDTD((200, 200, 200), 1e-3, npml=12, dtype=np.float64)
 ```
 
-For GPU runs, point PyOpenCL at your GPU platform (often `0` for NVIDIA):
+The solver prefers a GPU by default, falling back to CPU and skipping unusable
+platforms. To select a device with `PYOPENCL_CTX`, create and pass the context
+explicitly (the solver's default discovery does not read that variable):
 
-```bash
-# Linux / macOS
-export PYOPENCL_CTX=0
-
-# Windows PowerShell
-$env:PYOPENCL_CTX='0'
+```python
+import pyopencl as cl
+ctx = cl.create_some_context(interactive=False)
+sim = OpenCLFDTD((128, 128, 128), 1e-3, npml=12, ctx=ctx)
 ```
+
+For CPU validation on mixed-device hosts, set `IGNORE_GPU` to your GPU's
+vendor/name (e.g. `NVIDIA,AMD,Apple`), leaving the CPU device available.
 
 ---
 
@@ -65,6 +68,21 @@ PYOPENCL_CTX=0 python -m coverage run -m unittest \
   tests.test_solver tests.test_unit_engine tests.test_unit_monitors tests.test_unit_harness -v
 python -m coverage report --fail-under=90
 ```
+
+The complete coverage runner includes analytical dispersion, dielectric-sphere
+scattering, conductive-source and far-field regressions, and an **absolute
+metallic-mirror RCS** test. Run the mirror case alone with:
+
+```bash
+python -m unittest tests.test_mirror_rcs -v
+```
+
+It compares a 3λ × 3λ ideal conducting plate against the physical-optics
+prediction `RCS = 4π A²/λ²`, without fitted scaling, and checks the bistatic
+diffraction lobe, first null, time convergence, and grid refinement. The
+fine-grid broadside gate is 10%; this is a large-plate approximation, not an
+exact finite-plate solution. The PEC boundary is a test fixture; see
+[`docs/PHYSICS.md`](docs/PHYSICS.md#1011-metallic-mirror-absolute-rcs) for scope.
 
 Minimal smoke without coverage:
 
@@ -101,11 +119,11 @@ PYOPENCL_CTX=0 python tests/compare_with_meep.py
 
 | Case | What it checks | Tolerance |
 |---|---|---|
-| Near-field Ex DFT | Yee + CPML + Ex sheet at interior probes | peak-normalized max err `< 0.20` |
+| Near-field Ex DFT | Yee + CPML + Ex sheet at interior probes | peak-normalized max err `< 0.25` |
 | Far-field \|S\|(θ) vacuum | Near-to-far XZ pattern vs Meep | main lobe (`mask_db=-12`) `< 2.5 dB` |
 | Far-field vector EH | Ex/Hy on +z; deep null on +x | pol. err `< 0.35`; \|E(+x)\|/\|E(+z)\| `< 0.05` |
 | Dielectric sphere εᵣ=4 | Material + pattern | main lobe `< 3 dB` |
-| PML energy decay | Late/peak Ex energy ratio | both `< 0.05`, ratios within 100× |
+| PML energy decay | Late/peak Ex energy ratio | both `< 0.05` |
 
 ### Mid-plane Ex golden images + discrepancy report
 CI regenerates generic side-by-side mid-plane Ex triptychs (`OpenCL | Meep | residual`) and an objective **discrepancy report**, and requires both to match committed baselines under `tests/meep_validation/baselines/`:
@@ -138,6 +156,10 @@ PYOPENCL_CTX=0 python -m unittest tests.test_meep_farfield_baselines -v
 
 OpenCL ↔ NumPy field/monitor parity remains in `tests/test_solver.py` (always run in CI).
 
+Power patterns use `10*log10(|S|)`. The −12 dB comparison mask includes an
+angle if **either** solver has a lobe there; vector comparisons share one
+complex alignment across E and H and also require outward energy flux.
+
 ---
 
 ## 6. Accuracy for Practical Applications
@@ -146,9 +168,9 @@ OpenCL ↔ NumPy field/monitor parity remains in `tests/test_solver.py` (always 
 
 This package is a **2nd-order Yee + CPML kernel**. For nondispersive scalar-ε problems on a matched uniform grid (same Δx, Courant, and cell-wise materials), it is in the **same accuracy class as MEEP’s default FDTD**. MEEP is not inherently more accurate for that shared physics; the repo’s value proposition is GPU throughput, not higher-order fidelity.
 
-**Evidence (MEEP-relative, abstract cases):** mid-plane Ex shape agrees at ~98% Pearson correlation with ~3% aligned residual energy; far-field main-lobe |S|(θ) differs by ~0.7 dB (vacuum) to ~2.8 dB (εᵣ=4 sphere) under the CI masks. Those baselines use hard voxel materials (`eps_averaging=False` on the MEEP side) and do not certify a specific device design.
+**Evidence (MEEP-relative, abstract cases):** the generated [mid-plane](tests/meep_validation/baselines/DISCREPANCY_REPORT.md) and [far-field](tests/meep_validation/baselines/DISCREPANCY_REPORT_FARFIELD.md) reports contain the current quantitative results and enforced gates. Those baselines use hard voxel materials (`eps_averaging=False` on the MEEP side) and do not certify a specific device design.
 
-**When MEEP (or another full-featured solver) is usually ahead in practice:** dispersive / lossy / magnetic media, PEC/periodic/symmetry BCs, or any workflow that relies on a built-in geometry stack you do not provide yourself. (This solver supports OpenCL FP64 via `dtype=np.float64` when the device allows it — see [`docs/API.md`](docs/API.md).)
+**When MEEP (or another full-featured solver) is usually ahead in practice:** dispersive / magnetic media, PEC/periodic/symmetry BCs, or any workflow that relies on a built-in geometry stack you do not provide yourself. (This solver supports OpenCL ohmic conductivity and FP64 via `dtype=np.float64` when the device allows it — see [`docs/API.md`](docs/API.md).)
 
 **Subpixel averaging is intentionally out of scope.** The solver only accepts a cell-wise scalar εᵣ via `set_epsilon`; geometry sampling and effective-medium construction belong in the application layer. Typical choices include ~4³ subvoxels per Yee cell. At least two approaches fit this design:
 
@@ -173,7 +195,11 @@ PYOPENCL_CTX=0 python benchmarks/benchmark.py
 Re-run locally; do not treat older printed MCUPS as authoritative across machines or OpenCL backends.
 
 ### Benchmark 2: MEEP CPU vs OpenCL GPU
-Compares MEEP (CPU, Docker `local-pymeep:latest`) against this solver on a GPU. Default grid is **600³** (~216M cells, ~6.4 GB) for stable VRAM headroom. Use `--shape 750` only if your GPU has clear free memory after the headroom check.
+Compares MEEP (CPU, Docker `local-pymeep:latest`) against this solver on a GPU.
+Default grid is **600³** (~216M cells). With 25-cell CPML, the FP32 solver
+buffers require about **10.46 GiB**, before driver overhead and monitors.
+Check `estimate_device_memory_bytes` and available device memory before
+choosing a large grid; the six material-coefficient volumes must be included.
 
 ```bash
 PYOPENCL_CTX=0 python -u benchmarks/benchmark_vs_meep.py
@@ -181,7 +207,11 @@ PYOPENCL_CTX=0 python -u benchmarks/benchmark_vs_meep.py
 PYOPENCL_CTX=0 python -u benchmarks/benchmark_vs_meep.py --shape 600 --skip-meep
 ```
 
-Measured on NVIDIA GeForce RTX 5080 (15.92 GB reported), AMD Ryzen 9 7945HX, field updates + Ex sheet source, **no monitors** (median of 3 timed windows after warm-up):
+Historical measurements on NVIDIA GeForce RTX 5080 (15.92 GB reported), AMD
+Ryzen 9 7945HX, field updates + Ex sheet source, **no monitors** (median of 3
+timed windows after warm-up). These predate the corrected memory estimate;
+in particular, 750³ exceeds this card's current solver-buffer budget. Rerun
+benchmarks for current performance rather than treating these as current results:
 
 | Case | Grid | OpenCL | MEEP CPU | Speedup |
 |---|---:|---:|---:|---:|

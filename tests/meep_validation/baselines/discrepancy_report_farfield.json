@@ -10,9 +10,9 @@
       ],
       "max_main_lobe_db": 2.5,
       "metrics": {
-        "main_lobe_max_abs_db_error": 1.5619494,
+        "main_lobe_max_abs_db_error": 0.38516951,
         "meep_null_ratio": 1.8117464e-05,
-        "opencl_null_ratio": 0.038253785
+        "opencl_null_ratio": 0.029249575
       },
       "n_angles": 19,
       "n_steps": 500,
@@ -36,9 +36,9 @@
       ],
       "max_main_lobe_db": 3.0,
       "metrics": {
-        "main_lobe_max_abs_db_error": 1.3922205,
+        "main_lobe_max_abs_db_error": 0.52055316,
         "meep_null_ratio": 1.8161653e-05,
-        "opencl_null_ratio": 0.033442506
+        "opencl_null_ratio": 0.026825743
       },
       "n_angles": 19,
       "n_steps": 500,
@@ -55,7 +55,7 @@
   ],
   "description": "Objective comparison of XZ far-field |S|(\u03b8) and null depth between OpenCLNear2FarMonitor and Meep Near2Far on shared compact-patch cases.",
   "metric_definitions": {
-    "main_lobe_max_abs_db_error": "Max |\u0394| after aligning each pattern's peak to 0 dB, restricted to angles within mask_db=-12 of both peaks.",
+    "main_lobe_max_abs_db_error": "Max |\u0394| after aligning each pattern's peak to 0 dB, restricted to angles within mask_db=-12 of either pattern's peak.",
     "meep_null_ratio": "|E(+x)| / |E(+z)| on Meep (H scaled to SI).",
     "opencl_null_ratio": "|E(+x)| / |E(+z)| on OpenCL (Ex-dipole endfire null)."
   },

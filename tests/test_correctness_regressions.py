@@ -188,20 +188,20 @@ class TestFarfieldPhysics(unittest.TestCase):
         k = 2 * np.pi * 5e9 / C0
         for cls in (NumPyNear2FarMonitor, OpenCLNear2FarMonitor):
             values = []
-            for shift in (0, .001):
-                mon = cls(s, (.008, .008, .008 + shift), (.004,)*3, 5e9)
-                for name, value in (("Ex", 1.), ("Hy", 1./ETA0)):
+            for shift in (0, 0.001):
+                mon = cls(s, (0.008, 0.008, 0.008 + shift), (0.004,) * 3, 5e9)
+                for name, value in (("Ex", 1.0), ("Hy", 1.0 / ETA0)):
                     data = np.zeros(mon.n_face_samples, dtype=np.complex64)
-                    data[mon._face_offsets[5]:] = value
+                    data[mon._face_offsets[5] :] = value
                     if isinstance(mon, NumPyNear2FarMonitor):
                         getattr(mon, name + "_dft_f")[:] = data
                     else:
                         cl.enqueue_copy(s.queue, getattr(mon, name + "_dft_buf"), data)
-                a = mon.get_farfield((0, 0, 1.))[0]
+                a = mon.get_farfield((0, 0, 1.0))[0]
                 b = mon.get_farfield((0, 0, 1.01))[0]
-                np.testing.assert_allclose(b / a * 1.01, np.exp(1j*k*.01), rtol=2e-5)
+                np.testing.assert_allclose(b / a * 1.01, np.exp(1j * k * 0.01), rtol=2e-5)
                 values.append(a)
-            np.testing.assert_allclose(values[1] / values[0], np.exp(-1j*k*.001), rtol=2e-5)
+            np.testing.assert_allclose(values[1] / values[0], np.exp(-1j * k * 0.001), rtol=2e-5)
 
     def test_huygens_face_direction_and_outward_flux(self):
         s = OpenCLFDTD((12, 12, 12), 1e-3, npml=2)

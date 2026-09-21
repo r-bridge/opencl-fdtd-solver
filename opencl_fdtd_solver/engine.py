@@ -499,7 +499,8 @@ class OpenCLFDTD(SourceMonitorMixin):
     ):
         """Inject SI current density ``Jx`` (A/m²) on a constant-z Ex sheet.
 
-        Applies ``Ex += -dt/(ε₀ εᵣ) Jx`` using the on-device ε buffer, matching
+        Applies ``Ex += -Cb*Jx`` using the on-device lossy E-update coefficient
+        (``Cb=dt/(ε₀ εᵣ)`` in lossless media), matching
         Meep's ``D -= J·dt`` then ``E = χ⁻¹ D`` (with SI ε₀ restored).
 
         Optional half-open ``[i0, i1)`` / ``[j0, j1)`` sheet bounds (default: full XY).
