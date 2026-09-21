@@ -13,7 +13,7 @@ __kernel void add_source_Ex(
     int j = get_global_id(0);
     int i = get_global_id(1);
 
-    if (i >= Nx || j >= Ny) return;
+    if (i >= Nx || j >= Ny || z_src < 0 || z_src >= Nz) return;
     if (i < i0 || i >= i1 || j < j0 || j >= j1) return;
 
     int idx = i * Ny * Nz + j * Nz + z_src;
@@ -35,7 +35,7 @@ __kernel void add_source_Jx(
     int j = get_global_id(0);
     int i = get_global_id(1);
 
-    if (i >= Nx || j >= Ny) return;
+    if (i >= Nx || j >= Ny || z_src < 0 || z_src >= Nz) return;
     if (i < i0 || i >= i1 || j < j0 || j >= j1) return;
 
     real w = (real)1.0;

@@ -58,7 +58,7 @@ def build_farfield_discrepancy_document(cases: list[dict[str, Any]]) -> dict[str
         "metric_definitions": {
             "main_lobe_max_abs_db_error": (
                 "Max |Δ| after aligning each pattern's peak to 0 dB, restricted to "
-                "angles within mask_db=-12 of both peaks."
+                "angles within mask_db=-12 of either pattern's peak."
             ),
             "opencl_null_ratio": "|E(+x)| / |E(+z)| on OpenCL (Ex-dipole endfire null).",
             "meep_null_ratio": "|E(+x)| / |E(+z)| on Meep (H scaled to SI).",

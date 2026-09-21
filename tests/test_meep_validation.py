@@ -31,7 +31,6 @@ import numpy as np
 from opencl_fdtd_solver.constants import ETA0
 from tests.meep_validation import (
     MeepUnavailableError,
-    complex_align,
     max_abs_db_error,
     peak_normalize,
 )
@@ -123,22 +122,15 @@ class TestMeepValidation(unittest.TestCase):
         mp_z = eh_from_list(mp["eh_plus_z"])
         mp_z[3:6] = mp_z[3:6] / ETA0
 
-        # Polarization only where the pattern is strong (+z for Ex drive).
-        for tag, sl in (("E", slice(0, 3)), ("H", slice(3, 6))):
-            a = np.asarray(cl_z[sl], dtype=np.complex128)
-            b = np.asarray(mp_z[sl], dtype=np.complex128)
-            i = int(np.argmax(np.abs(b)))
-            self.assertGreater(abs(a[i]), 0.0)
-            a = a * (abs(b[i]) / abs(a[i]))
-            a = np.array([complex_align(ai, bi) for ai, bi in zip(a, b)])
-            a_n = a / np.linalg.norm(a)
-            b_n = b / np.linalg.norm(b)
-            err = float(np.max(np.abs(a_n - b_n)))
-            self.assertLess(
-                err,
-                0.35,
-                f"Far-field {tag} mismatch on +z: max |Δ|={err:.3f}",
-            )
+        # One common phase/amplitude alignment preserves E/H relative signs.
+        scale = np.array([1, 1, 1, ETA0, ETA0, ETA0])
+        a, b = cl_z * scale, mp_z * scale
+        self.assertGreater(np.linalg.norm(a), 0)
+        alignment = np.vdot(a, b) / np.vdot(a, a)
+        err = np.linalg.norm(a * alignment - b) / np.linalg.norm(b)
+        self.assertLess(err, 0.35, f"Complex EH mismatch on +z: {err:.3f}")
+        for eh in (cl_z, mp_z):
+            self.assertGreater(float(np.real(np.cross(eh[:3], eh[3:].conj())[2])), 0)
 
         # +x is near the Ex-dipole null: |E| ≪ main lobe (noise; do not compare pol.).
         cl_x = eh_from_list(cl["eh_plus_x"])

@@ -20,6 +20,7 @@ import warnings
 
 import numpy as np
 
+from ._validation import sheet_current, source_sheet, validate_grid
 from .constants import C0, EPS0, MU0
 from .cpml import build_cpml_profiles
 from .materials import yee_edge_ce
@@ -33,9 +34,8 @@ class NumPyFDTD(SourceMonitorMixin):
     """
 
     def __init__(self, shape, dl, npml=20, dtype=np.float32, psi_dtype: np.dtype | None = None):
+        shape, self.dl, self.npml = validate_grid(shape, dl, npml)
         self.Nx, self.Ny, self.Nz = shape
-        self.dl = float(dl)
-        self.npml = int(npml)
         self.dtype = dtype
         # Allow overriding CPML auxiliary-field dtype to reduce memory (e.g., np.float16).
         # Defaults to main computation dtype to preserve numerical parity.
@@ -44,7 +44,7 @@ class NumPyFDTD(SourceMonitorMixin):
         self.step_num = 0
 
         # Courant-stable time step
-        self.dt = 0.99 * dl / (C0 * np.sqrt(3.0))
+        self.dt = 0.99 * self.dl / (C0 * np.sqrt(3.0))
 
         # Initialize Yee fields
         self.Ex = np.zeros(shape, dtype=dtype)
@@ -86,12 +86,8 @@ class NumPyFDTD(SourceMonitorMixin):
             DeprecationWarning,
             stacklevel=2,
         )
-        i0_i = 0 if i0 is None else int(i0)
-        i1_i = self.Nx if i1 is None else int(i1)
-        j0_i = 0 if j0 is None else int(j0)
-        j1_i = self.Ny if j1 is None else int(j1)
-        z = int(z_src)
-        self.Ex[i0_i:i1_i, j0_i:j1_i, z] += self.dtype(amp)
+        z, i0_i, i1_i, j0_i, j1_i = source_sheet((self.Nx, self.Ny, self.Nz), z_src, i0, i1, j0, j1)
+        self.Ex[i0_i:i1_i, j0_i:j1_i, z] += np.dtype(self.dtype).type(amp)
 
     def add_source_Jx(
         self,
@@ -120,20 +116,8 @@ class NumPyFDTD(SourceMonitorMixin):
         cases. With ``rim_renorm`` (default true), ``Jx`` is scaled so ∑weights
         equals the hard cell count (preserves net ∫J).
         """
-        i0_i = 0 if i0 is None else int(i0)
-        i1_i = self.Nx if i1 is None else int(i1)
-        j0_i = 0 if j0 is None else int(j0)
-        j1_i = self.Ny if j1 is None else int(j1)
-        z = int(z_src)
-        jx = float(Jx)
-        re = float(rim_edge)
-        if rim_taper and rim_renorm:
-            nx_s = max(0, i1_i - i0_i)
-            ny_s = max(0, j1_i - j0_i)
-            if nx_s >= 2 and ny_s >= 2:
-                ni, nj = nx_s - 2, ny_s - 2
-                wsum = ni * nj + re * (2 * ni + 2 * nj) + (re * re) * 4
-                jx *= (nx_s * ny_s) / wsum
+        z, i0_i, i1_i, j0_i, j1_i = source_sheet((self.Nx, self.Ny, self.Nz), z_src, i0, i1, j0, j1)
+        jx, re = sheet_current(Jx, i1_i - i0_i, j1_i - j0_i, rim_taper, rim_edge, rim_renorm)
 
         sl_i = slice(i0_i, i1_i)
         sl_j = slice(j0_i, j1_i)
@@ -142,15 +126,21 @@ class NumPyFDTD(SourceMonitorMixin):
             nx_s = max(0, i1_i - i0_i)
             ny_s = max(0, j1_i - j0_i)
             w = np.ones((nx_s, ny_s), dtype=self.dtype)
-            # Match OpenCL: both lo/hi edge checks fire on a 1-cell span (×rim²).
+            # Match OpenCL: a cell on both edges is weighted once per axis.
             if nx_s >= 1:
                 w[0, :] *= re
+            if nx_s >= 2:
                 w[-1, :] *= re
             if ny_s >= 1:
                 w[:, 0] *= re
+            if ny_s >= 2:
                 w[:, -1] *= re
             soft = soft * w
-        self.Ex[sl_i, sl_j, z] += soft.astype(self.dtype, copy=False)
+
+        def inject():
+            self.Ex[sl_i, sl_j, z] += soft.astype(self.dtype, copy=False)
+
+        self._inject_current(inject)
 
     def _build_cpml(self):
         Nx, Ny, Nz = self.Nx, self.Ny, self.Nz
@@ -221,12 +211,12 @@ class NumPyFDTD(SourceMonitorMixin):
         dEy_dx = self._fwd(Ey, 0)
         dEx_dy = self._fwd(Ex, 1)
 
-        self._psi_Hx_y = self._by_h * self._psi_Hx_y + self._cy_h * dEz_dy
-        self._psi_Hx_z = self._bz_h * self._psi_Hx_z + self._cz_h * dEy_dz
-        self._psi_Hy_x = self._bx_h * self._psi_Hy_x + self._cx_h * dEz_dx
-        self._psi_Hy_z = self._bz_h * self._psi_Hy_z + self._cz_h * dEx_dz
-        self._psi_Hz_x = self._bx_h * self._psi_Hz_x + self._cx_h * dEy_dx
-        self._psi_Hz_y = self._by_h * self._psi_Hz_y + self._cy_h * dEx_dy
+        self._psi_Hx_y[...] = self._by_h * self._psi_Hx_y + self._cy_h * dEz_dy
+        self._psi_Hx_z[...] = self._bz_h * self._psi_Hx_z + self._cz_h * dEy_dz
+        self._psi_Hy_x[...] = self._bx_h * self._psi_Hy_x + self._cx_h * dEz_dx
+        self._psi_Hy_z[...] = self._bz_h * self._psi_Hy_z + self._cz_h * dEx_dz
+        self._psi_Hz_x[...] = self._bx_h * self._psi_Hz_x + self._cx_h * dEy_dx
+        self._psi_Hz_y[...] = self._by_h * self._psi_Hz_y + self._cy_h * dEx_dy
 
         self.Hx -= dtm * (
             dEz_dy / (self._ky_h * self.dl)
@@ -257,12 +247,12 @@ class NumPyFDTD(SourceMonitorMixin):
         dHy_dx = self._bwd(Hy, 0)
         dHx_dy = self._bwd(Hx, 1)
 
-        self._psi_Ex_y = self._by_e * self._psi_Ex_y + self._cy_e * dHz_dy
-        self._psi_Ex_z = self._bz_e * self._psi_Ex_z + self._cz_e * dHy_dz
-        self._psi_Ey_x = self._bx_e * self._psi_Ey_x + self._cx_e * dHz_dx
-        self._psi_Ey_z = self._bz_e * self._psi_Ey_z + self._cz_e * dHx_dz
-        self._psi_Ez_x = self._bx_e * self._psi_Ez_x + self._cx_e * dHy_dx
-        self._psi_Ez_y = self._by_e * self._psi_Ez_y + self._cy_e * dHx_dy
+        self._psi_Ex_y[...] = self._by_e * self._psi_Ex_y + self._cy_e * dHz_dy
+        self._psi_Ex_z[...] = self._bz_e * self._psi_Ex_z + self._cz_e * dHy_dz
+        self._psi_Ey_x[...] = self._bx_e * self._psi_Ey_x + self._cx_e * dHz_dx
+        self._psi_Ey_z[...] = self._bz_e * self._psi_Ey_z + self._cz_e * dHx_dz
+        self._psi_Ez_x[...] = self._bx_e * self._psi_Ez_x + self._cx_e * dHy_dx
+        self._psi_Ez_y[...] = self._by_e * self._psi_Ez_y + self._cy_e * dHx_dy
 
         self.Ex += self._ce_x * (
             dHz_dy / (self._ky_e * self.dl)
@@ -284,14 +274,7 @@ class NumPyFDTD(SourceMonitorMixin):
         )
 
     def step(self):
-        self._update_H()
-        # Soft currents belong at (n+1/2)Δt in the leapfrog E update.
-        t_int = self.t
-        self.t = t_int + 0.5 * self.dt
-        for src in self._sources:
-            src(self)
-        self.t = t_int
-        self._update_E()
+        self._step_fields()
         self.t += self.dt
         self.step_num += 1
         for mon in self._monitors:

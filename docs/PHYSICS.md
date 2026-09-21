@@ -15,7 +15,7 @@ It is intentionally a **kernel**, not a full CAD/EM suite:
 | Included | Not included |
 |---|---|
 | Uniform cubic Yee grid | Non-uniform / unstructured meshes |
-| Nondispersive scalar εᵣ | Lorentz / Debye / Drude media |
+| Nondispersive scalar εᵣ, optional ohmic σ on OpenCL | Lorentz / Debye / Drude media |
 | Vacuum μ = μ₀ | Magnetic materials (μᵣ ≠ 1) |
 | Soft Ex / SI Jx sheet sources | Built-in antennas, PEC/PMC, periodic BCs |
 | Closed-box Huygens near-to-far | Full geometric optics / high-frequency asymptotics |
@@ -57,10 +57,12 @@ In vacuum or nondispersive dielectric with **μ = μ₀** and no free charges:
 
 \[
 \nabla\times\mathbf{E} = -\mu_0\,\partial_t\mathbf{H},\qquad
-\nabla\times\mathbf{H} = \varepsilon_0\varepsilon_r\,\partial_t\mathbf{E} + \mathbf{J}.
+\nabla\times\mathbf{H} = \varepsilon_0\varepsilon_r\,\partial_t\mathbf{E} + \sigma\mathbf{E} + \mathbf{J}.
 \]
 
-There is **no ohmic conductivity term** and **no magnetic contrast**. Any loss or magnetic response would have to be modelled outside this package.
+The OpenCL engine supports scalar, frequency-independent **ohmic conductivity**
+σ. The NumPy reference is lossless (σ=0). Neither supports magnetic contrast or
+dispersive polarization models.
 
 ---
 
@@ -79,8 +81,8 @@ There is **no ohmic conductivity term** and **no magnetic contrast**. Any loss o
 Each time step:
 
 1. Advance **H** to time \(n+\tfrac12\).
-2. Apply soft sources at time \(n+\tfrac12\) (half-step).
-3. Advance **E** to time \(n+1\).
+2. Sample current sources at time \(n+\tfrac12\) (half-step).
+3. Advance **E** to time \(n+1\), including the current term after old-field decay.
 4. Advance \(t\leftarrow t+\Delta t\); optionally accumulate DFT / near-to-far monitors.
 
 Interior curls (before PML terms) are the usual centered differences:
@@ -95,8 +97,13 @@ Interior curls (before PML terms) are the usual centered differences:
 \[
 \mathbf{E}^{n+1}
   \leftarrow
-  \mathbf{E}^{n}
-  + \frac{\Delta t}{\varepsilon_0\varepsilon_r}\,\nabla\times\mathbf{H}^{n+1/2}.
+  C_a\mathbf{E}^{n}
+  + C_b\bigl(\nabla\times\mathbf{H}^{n+1/2}-\mathbf{J}^{n+1/2}\bigr),
+\qquad
+C_a=\frac{1-q}{1+q},\quad
+C_b=\frac{\Delta t/\varepsilon}{1+q},\quad
+q=\frac{\sigma\Delta t}{2\varepsilon},\quad
+\varepsilon=\varepsilon_0\varepsilon_r.
 \]
 
 ### 4.3 Courant number
@@ -120,17 +127,21 @@ For a plane wave along a lattice axis, the discrete dispersion relation used in 
 S\,\sin\!\Bigl(\frac{\tilde{k}\,\Delta\ell}{2}\Bigr).
 \]
 
-This is the expected Yee dispersion; there is no higher-order correction.
+This is the expected Yee dispersion; there is no higher-order correction. The
+regression propagates a pulse, measures phase at two probes, and checks both
+this relation and decreasing phase-velocity error on grid refinement.
 
 ---
 
 ## 5. Materials
 
-Only **relative permittivity** \(\varepsilon_r\) is programmable:
+**Relative permittivity** \(\varepsilon_r\) and optional OpenCL **conductivity**
+\(\sigma\) are programmable:
 
 - Stored as a cell-centered array via `set_epsilon`.
-- Converted to edge coefficients \(c_e = \Delta t/(\varepsilon_0\varepsilon_r)\) for the E update.
-- Default: vacuum \(\varepsilon_r=1\).
+- Both are averaged onto Yee edges and converted to the trapezoidal-loss
+  coefficients \(C_a,C_b\) above.
+- Default: vacuum \(\varepsilon_r=1,\sigma=0\).
 
 **Implications for reviewers**
 
@@ -169,10 +180,13 @@ Separate 1-D profiles are built for E-node and H-node locations (half-cell stagg
 On a constant-\(z\) \(E_x\) sheet:
 
 \[
-E_x \;\mathrel{+}=\; -\frac{\Delta t}{\varepsilon_0\varepsilon_r}\,J_x\,w
+E_x \;\mathrel{+}=\; -C_b\,J_x\,w
 \]
 
-with \(J_x\) in A/m². This matches Meep’s \(D\leftarrow D-J\,\Delta t\) once SI \(\varepsilon_0\) is restored.
+with \(J_x\) in A/m² and \(C_b=\Delta t/(\varepsilon_0\varepsilon_r)\) in a
+lossless medium. This matches Meep’s \(D\leftarrow D-J\,\Delta t\) once SI
+\(\varepsilon_0\) is restored. In a conductor the source is not multiplied by
+an additional \(C_a\); a driven, uniform Ampère-law recurrence checks this.
 
 Optional **rim taper** (default rim weight 0.8) down-weights the sheet perimeter (edges ×0.8, corners ×0.64) to better match Meep’s continuous volume-source restriction. With renorm enabled, the weights are rescaled so the **net ∫J** is preserved.
 
@@ -184,7 +198,9 @@ Sheets used in Meep baselines are trimmed **out of the PML**.
 
 ### 7.3 Timing
 
-Soft sources are applied at the **H half-step** (\(n+\tfrac12\)), consistent with leapfrog staggering of current relative to E.
+Current sources are sampled at the **H half-step** (\(n+\tfrac12\)), consistent
+with leapfrog staggering, and added to the completed E update. Legacy field
+adds are immediate and, if applied before that update, undergo its decay.
 
 ---
 
@@ -197,21 +213,33 @@ A closed rectangular **Huygens surface** is defined in physical metres and snapp
 \mathbf{M}_s = -\hat{n}\times\mathbf{E}.
 \]
 
-Face DFT accumulates tangential fields; **H** carries the half-step phase \(e^{-j\omega\Delta t/2}\) so E and H are co-located in time for the integral. Radiation integrals \(\mathbf{N},\mathbf{L}\) use phase \(e^{+jk\cdot\mathbf{r}'}\) and trapezoidal edge/corner weights.
+Face DFT uses \(\int f(t)e^{+i\omega t}\,dt\). **H** carries the half-step
+phase \(e^{-i\omega\Delta t/2}\) so E and H are co-located in time for the
+integral. Radiation integrals \(\mathbf{N},\mathbf{L}\) of the currents above
+use phase \(e^{-ik\hat r\cdot\mathbf{r}'}\) and trapezoidal edge/corner weights.
 
-Far fields (Balanis / Taflove convention, outgoing \(e^{-jkr}\)):
+Far fields with this Fourier convention (outgoing \(e^{+ikr}\)):
 
 \[
 \mathbf{E}
 =
--\frac{jk}{4\pi r}\,e^{-jkr}
-\bigl(\eta_0\,\mathbf{N}_\perp + \hat{r}\times\mathbf{L}\bigr),\qquad
+\frac{ik}{4\pi r}\,e^{+ikr}
+\bigl(\eta_0\,\mathbf{N}_\perp - \hat{r}\times\mathbf{L}\bigr),\qquad
 \mathbf{H}
 =
--\frac{1}{\eta_0}\,\hat{r}\times\mathbf{E}.
+\frac{1}{\eta_0}\,\hat{r}\times\mathbf{E}.
 \]
 
-Pattern plots use complex Poynting magnitude; dB is \(20\log_{10}|S|\) after peak normalization. For an \(E_x\)-driven sheet, expect a main lobe along \(\pm z\) with \(E_x/H_y\) polarization and a deep endfire null along \(\pm x\).
+Internally the implementation integrates the negatives of these conventional
+currents (\(\mathbf{H}\times\hat n\), \(\hat n\times\mathbf{E}\)), so its
+prefactor is \(-ik\), giving the same fields. The positive H relation ensures
+outward time-averaged energy flux. Radius and source-translation regressions
+check phase, not just magnitudes.
+
+Pattern plots use complex Poynting magnitude; power dB is
+\(10\log_{10}|S|\). The plotting comparisons subtract the peak; the API returns
+unnormalized power dB. For an \(E_x\)-driven sheet, expect a main lobe along
+\(\pm z\) with \(E_x/H_y\) polarization and a deep endfire null along \(\pm x\).
 
 **Caveat for reviewers:** null floors vs Meep can differ by orders of magnitude on these tiny grids; main-lobe comparisons within ~12 dB of peak are the intended metric, not absolute null depth.
 
@@ -243,6 +271,33 @@ Implemented in `tests/test_analytic_validation.py`:
 - Closed-box (npml=0) electromagnetic energy stability after the source is off.
 - Dielectric-sphere bistatic E-plane shape vs Bohren–Huffman Mie series (`tests/analytic_mie.py`; normalized pattern correlation, not absolute RCS).
 
+`tests/test_correctness_regressions.py` additionally checks conductive-source
+amplitudes, outward flux, one-sided Huygens radiation on all six faces,
+radial/translation phase, and CPU/GPU agreement relative to field magnitude.
+
+### 10.1.1 Metallic mirror: absolute RCS
+
+`tests/test_mirror_rcs.py` runs an ideal, zero-thickness conducting square of
+side \(a=3\lambda=0.18\) m under normal, x-polarized plane-wave illumination.
+The test fixture imposes \(E_{s,t}=-E_{i,t}\) on tangential Yee edges; the
+ordinary Yee/CPML kernels evolve the scattered field elsewhere. No second
+solver or fitted amplitude scale is used. This fixture does not add a public
+PEC API and does not validate finite-metal skin-depth meshing.
+
+The measured quantity is \(\sigma=4\pi r^2|E_s|^2/|E_i|^2\), in m². The
+large-plate physical-optics prediction for broadside backscatter is
+\(\sigma_{\rm PO}=4\pi a^4/\lambda^2\approx3.66435\) m². The bistatic
+E-plane prediction, at observation angle θ from the reflected normal, is
+\(\sigma_{\rm PO}(\theta)=\sigma_{\rm PO}(0)\cos^2\theta
+[\sin u/u]^2\), \(u=\pi a\sin\theta/\lambda\).
+
+Gates: fine-grid broadside error <10%; absolute non-null angular samples
+within 15%; first-null power <1% of broadside; end-of-run field change <0.5%.
+Refining from 10 to 14 cells/λ must reduce the broadside discrepancy. These
+tolerances include finite-grid and physical-optics approximation error:
+the formula is **not an exact finite-plate Maxwell solution**, and edge
+diffraction can fill its nulls. See the [NASA flat-plate RCS study](https://ntrs.nasa.gov/citations/19750002834).
+
 ### 10.2 OpenCL ↔ NumPy parity
 
 The CPU NumPy engine implements the **same** Yee + CPML update. Field components after identical sources must match within tight absolute tolerances (`tests/test_solver.py`). This catches kernel bugs independent of Meep.
@@ -255,20 +310,26 @@ CI compares against [Meep](https://meep.readthedocs.io/) on shared abstract case
 
 | Check | Tolerance |
 |---|---|
-| Near-field Ex DFT (peak-normalized) | max error \(\lt 0.20\)–\(0.25\) |
+| Near-field Ex DFT (peak-normalized) | max error \(\lt 0.25\) |
 | Far-field \(\lvert S\rvert(\theta)\) vacuum, main lobe (−12 dB mask) | \(\lt 2.5\,\mathrm{dB}\) |
 | Polarization on \(+z\); null on \(+x\) | pol. error \(\lt 0.35\); \(\lvert E(+x)\rvert/\lvert E(+z)\rvert\lt 0.05\) |
 | Dielectric sphere \(\varepsilon_r=4\) pattern | main lobe \(\lt 3\,\mathrm{dB}\) |
 | PML energy decay | late/peak \(\lt 0.05\) |
 
+Pattern gates use the **union** of angles within 12 dB of either peak so a
+missing lobe cannot be masked away. Vector checks use one common complex
+alignment for all six components, with H scaled by η₀, and require outward
+flux; E and H cannot independently hide a sign error.
+
 **Committed quantitative evidence** (regenerated and bit-compared in CI):
 
 - Mid-plane Ex: [`tests/meep_validation/baselines/DISCREPANCY_REPORT.md`](../tests/meep_validation/baselines/DISCREPANCY_REPORT.md)  
-  Typical: Pearson correlation \(\approx 0.983\), aligned residual energy \(\approx 2.3\%\), zero cell lag.
+  Includes Pearson correlation, aligned residual energy, and spatial lag.
 - Far field: [`tests/meep_validation/baselines/DISCREPANCY_REPORT_FARFIELD.md`](../tests/meep_validation/baselines/DISCREPANCY_REPORT_FARFIELD.md)  
-  Typical main-lobe \(\lvert\Delta\rvert\): \(\approx 0.6\,\mathrm{dB}\) (vacuum), \(\approx 0.8\,\mathrm{dB}\) (\(\varepsilon_r=4\) sphere).
+  Includes power-pattern discrepancy and null depth for vacuum and a dielectric sphere.
 
-These baselines certify **agreement of the shared FDTD physics**, not a particular antenna or device design.
+These baselines demonstrate agreement for the tested cases, not correctness
+for every supported configuration or certification of a device design.
 
 ---
 
@@ -291,9 +352,8 @@ Use this when deciding whether results are trustworthy for your problem.
 
 Prefer Meep or a commercial code if you need any of:
 
-- dispersive / lossy / magnetic media,
+- dispersive / magnetic media,
 - PEC, periodic, or symmetry boundaries,
-- double precision throughout,
 - built-in geometry, subpixel averaging, or eigenmode ports,
 - certification of a specific fabricated device without your own meshing pipeline.
 

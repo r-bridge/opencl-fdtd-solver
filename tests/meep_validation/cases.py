@@ -314,7 +314,7 @@ for ang in angles:
     Sy = 0.5 * (E[2]*np.conj(H[0]) - E[0]*np.conj(H[2]))
     Sz = 0.5 * (E[0]*np.conj(H[1]) - E[1]*np.conj(H[0]))
     mag = float(np.sqrt(np.abs(Sx)**2 + np.abs(Sy)**2 + np.abs(Sz)**2))
-    S_db.append(20.0 * np.log10(max(mag, 1e-30)))
+    S_db.append(10.0 * np.log10(mag) if mag > 0 else float('-inf'))
 
 ff_z = sim.get_farfield(n2f, mp.Vector3(0, 0, Rmm))
 ff_x = sim.get_farfield(n2f, mp.Vector3(Rmm, 0, 0))

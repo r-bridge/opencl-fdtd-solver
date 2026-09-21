@@ -84,8 +84,8 @@ def peak_normalize(x: np.ndarray) -> np.ndarray:
 def max_abs_db_error(a_db: np.ndarray, b_db: np.ndarray, *, mask_db: float | None = None) -> float:
     """Max |Δ| after aligning peaks to 0 dB.
 
-    If ``mask_db`` is set (e.g. -15), only angles where *both* patterns are within
-    that many dB of their own peak are compared (ignores deep-null floor mismatch).
+    If ``mask_db`` is set (e.g. -15), compare angles where *either* pattern is
+    within that many dB of its peak, so a missing lobe cannot be masked out.
     """
     a = np.asarray(a_db, dtype=np.float64)
     b = np.asarray(b_db, dtype=np.float64)
@@ -93,7 +93,7 @@ def max_abs_db_error(a_db: np.ndarray, b_db: np.ndarray, *, mask_db: float | Non
     b0 = b - np.max(b)
     if mask_db is None:
         return float(np.max(np.abs(a0 - b0)))
-    mask = (a0 >= mask_db) & (b0 >= mask_db)
+    mask = (a0 >= mask_db) | (b0 >= mask_db)
     if not np.any(mask):
         return float(np.max(np.abs(a0 - b0)))
     return float(np.max(np.abs(a0[mask] - b0[mask])))
@@ -218,5 +218,5 @@ def poynting_db_from_eh(ff: np.ndarray) -> tuple[float, float]:
     Sy = 0.5 * (E[2] * np.conj(H[0]) - E[0] * np.conj(H[2]))
     Sz = 0.5 * (E[0] * np.conj(H[1]) - E[1] * np.conj(H[0]))
     mag = float(np.sqrt(np.abs(Sx) ** 2 + np.abs(Sy) ** 2 + np.abs(Sz) ** 2))
-    db = float(20.0 * np.log10(max(mag, 1e-30)))
+    db = float(10.0 * np.log10(mag)) if mag > 0 else float("-inf")
     return db, mag
