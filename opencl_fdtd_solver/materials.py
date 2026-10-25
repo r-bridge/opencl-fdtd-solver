@@ -56,6 +56,48 @@ def yee_edge_ce(
     )
 
 
+def yee_edge_pec(mask: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Cell-centered PEC mask → per-component Yee E-edge masks.
+
+    Cell ``(i, j, k)`` spans ``[i, i+1] × [j, j+1] × [k, k+1]``. ``Ex[i, j, k]``
+    lies at ``(i+½, j, k)``: it runs along x across cell ``i`` and sits on the
+    node line ``(j, k)``, so it is one of the four x-directed boundary edges of
+    the cells ``(i, j-1..j, k-1..k)``. The Ex mask is therefore the OR of the
+    cell mask over its two *transverse* neighbours (``j-1`` and ``k-1``),
+    clipped at the domain boundary; likewise Ey over ``i-1``/``k-1`` and Ez
+    over ``i-1``/``j-1``. Every one of the 12 edges of a masked cell ends up
+    masked, so finite and staircased conductors present a closed surface with
+    no active tangential edge. (Expanding along the component's *own* axis
+    instead would clamp collinear edges outside the cell and leave the
+    enclosing transverse edges free.)
+
+    Used by ``OpenCLFDTD.set_epsilon(pec_mask=)`` to pin those edges to
+    E = 0 (``ca = ce = 0``), the correct σ→∞ limit — feeding a huge σ into
+    ``yee_edge_ca_cb`` instead drives ``Ca → −1`` (sign-flipping, stable but
+    wrong), and a huge lossless εᵣ demands resolving the internal
+    wavelength. PEC needs neither: foil-like reflectors get exact tangential
+    E = 0 at any grid resolution.
+    """
+    m = np.asarray(mask, dtype=bool)
+    if m.ndim != 3:
+        raise ValueError(f"PEC mask must be 3-dimensional, got {m.ndim}D")
+
+    def _or_prev(a: np.ndarray, axis: int) -> np.ndarray:
+        """OR each cell with its predecessor along ``axis`` (index 0 keeps itself)."""
+        out = a.copy()
+        dst = [slice(None)] * 3
+        src = [slice(None)] * 3
+        dst[axis] = slice(1, None)
+        src[axis] = slice(None, -1)
+        out[tuple(dst)] |= a[tuple(src)]
+        return out
+
+    mx = _or_prev(_or_prev(m, 1), 2)
+    my = _or_prev(_or_prev(m, 0), 2)
+    mz = _or_prev(_or_prev(m, 0), 1)
+    return mx, my, mz
+
+
 def yee_edge_ca_cb(
     eps_r: np.ndarray, sigma: np.ndarray, dt: float, dtype=np.float32
 ) -> tuple[tuple[np.ndarray, np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray, np.ndarray]]:
