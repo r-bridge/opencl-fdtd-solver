@@ -228,10 +228,11 @@ class OpenCLFDTD(SourceMonitorMixin):
         that, use ``pec_mask`` instead.
 
         ``pec_mask`` (cell-centered bool, same shape) marks perfect-conductor
-        cells: every Yee E-edge touching a masked cell gets ``ca = ce = 0``,
-        pinning tangential E to zero exactly (fields start at zero). This is
-        the right model for foil/metal reflectors whose skin depth is far
-        below the grid step — see ``materials.yee_edge_pec``.
+        cells: all 12 Yee E-edges on the boundary of each masked cell get
+        ``ca = ce = 0``, pinning tangential E to zero exactly on the closed
+        cell surface (fields start at zero). This is the right model for
+        foil/metal reflectors whose skin depth is far below the grid step —
+        see ``materials.yee_edge_pec``.
         """
         expected = (self.Nx, self.Ny, self.Nz)
         if eps_array.shape != expected:

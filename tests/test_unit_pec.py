@@ -16,23 +16,57 @@ from opencl_fdtd_solver.materials import yee_edge_pec
 
 
 class TestYeeEdgePec(unittest.TestCase):
-    def test_edge_or_logic(self):
-        """An edge is PEC when either adjacent cell is PEC (closes the surface)."""
-        m = np.zeros((3, 3, 3), dtype=bool)
+    def test_single_cell_clamps_its_twelve_boundary_edges(self):
+        """One PEC cell masks exactly its 4 Ex, 4 Ey and 4 Ez cube edges.
+
+        Yee stagger: Ex[i,j,k] at (i+½, j, k), Ey at (i, j+½, k), Ez at
+        (i, j, k+½). Cell (1,1,1) spans [1,2]³, so its x-edges are the Ex
+        samples at i=1 on the node lines (j,k) ∈ {1,2}², and so on.
+        """
+        m = np.zeros((4, 4, 4), dtype=bool)
         m[1, 1, 1] = True
         mx, my, mz = yee_edge_pec(m)
-        # the masked cell itself
-        self.assertTrue(mx[1, 1, 1] and my[1, 1, 1] and mz[1, 1, 1])
-        # the edge one cell "before" along each stagger axis touches the PEC cell
-        self.assertTrue(mx[0, 1, 1])
-        self.assertTrue(my[1, 0, 1])
-        self.assertTrue(mz[1, 1, 0])
-        # edges not touching the cell stay active
-        self.assertFalse(mx[2, 1, 1] or my[1, 2, 1] or mz[1, 1, 2])
-        # 9 total per component: the 3x3 cell face behind + the cell itself... just
-        # check the count is small and equal across components by symmetry
-        self.assertEqual(mx.sum(), my.sum())
-        self.assertEqual(my.sum(), mz.sum())
+
+        ex = {(1, 1, 1), (1, 2, 1), (1, 1, 2), (1, 2, 2)}
+        ey = {(1, 1, 1), (2, 1, 1), (1, 1, 2), (2, 1, 2)}
+        ez = {(1, 1, 1), (2, 1, 1), (1, 2, 1), (2, 2, 1)}
+        self.assertEqual(set(map(tuple, np.argwhere(mx))), ex)
+        self.assertEqual(set(map(tuple, np.argwhere(my))), ey)
+        self.assertEqual(set(map(tuple, np.argwhere(mz))), ez)
+        # no expansion along a component's own axis: collinear edges outside
+        # the cell stay active
+        self.assertFalse(mx[0, 1, 1] or mx[2, 1, 1])
+        self.assertFalse(my[1, 0, 1] or my[1, 2, 1])
+        self.assertFalse(mz[1, 1, 0] or mz[1, 1, 2])
+
+    def test_block_surface_is_closed(self):
+        """Every boundary edge of a finite block is masked, interior edges too,
+        and nothing outside the block's cube is touched."""
+        m = np.zeros((8, 8, 8), dtype=bool)
+        m[2:5, 2:5, 2:5] = True  # block spans [2,5]^3 in node coordinates
+        mx, my, mz = yee_edge_pec(m)
+        # Ex edges of the block: i in 2..4 (run across the cells), j,k in 2..5 (node lines)
+        self.assertTrue(mx[2:5, 2:6, 2:6].all())
+        self.assertEqual(mx.sum(), 3 * 4 * 4)
+        self.assertTrue(my[2:6, 2:5, 2:6].all())
+        self.assertEqual(my.sum(), 4 * 3 * 4)
+        self.assertTrue(mz[2:6, 2:6, 2:5].all())
+        self.assertEqual(mz.sum(), 4 * 4 * 3)
+
+    def test_domain_boundary_is_clipped(self):
+        """A PEC cell at index 0 has no predecessor; the mask must not wrap or fail."""
+        m = np.zeros((3, 3, 3), dtype=bool)
+        m[0, 0, 0] = True
+        mx, my, mz = yee_edge_pec(m)
+        self.assertEqual(
+            set(map(tuple, np.argwhere(mx))), {(0, 0, 0), (0, 1, 0), (0, 0, 1), (0, 1, 1)}
+        )
+        self.assertEqual(
+            set(map(tuple, np.argwhere(my))), {(0, 0, 0), (1, 0, 0), (0, 0, 1), (1, 0, 1)}
+        )
+        self.assertEqual(
+            set(map(tuple, np.argwhere(mz))), {(0, 0, 0), (1, 0, 0), (0, 1, 0), (1, 1, 0)}
+        )
 
     def test_mask_input_not_mutated(self):
         m = np.zeros((4, 4, 4), dtype=bool)
@@ -73,6 +107,42 @@ class TestEnginePec(unittest.TestCase):
         self.assertEqual(inside, 0.0)
         self.assertGreater(front, 1e-3)
         self.assertLess(behind, front * 1e-6)
+
+    def test_finite_block_has_no_active_tangential_edge(self):
+        """Illuminate a finite PEC block; tangential E must be exactly zero on
+        all six faces, including the +x/+y/+z faces that an axial-only mask
+        expansion leaves free."""
+        shape = (28, 28, 40)
+        npml = 4
+        fdtd = OpenCLFDTD(shape, 2e-3, npml=npml)
+        eps = np.ones(shape, dtype=np.float32)
+        pec = np.zeros(shape, dtype=bool)
+        a, b = 10, 18  # cells a..b-1 → block occupies node range [a, b]
+        c0, c1 = 14, 20
+        pec[a:b, a:b, c0:c1] = True
+        fdtd.set_epsilon(eps, pec_mask=pec)
+        z_src = shape[2] - npml - 2
+        fdtd.add_source(lambda f: f.add_source_Ex(z_src, np.sin(2 * np.pi * 10e9 * f.t)))
+        fdtd.run(140)
+
+        im, jm, km = (a + b) // 2, (a + b) // 2, (c0 + c1) // 2
+        # Ex is tangential on the ±y and ±z faces
+        for j in (a, b):
+            self.assertEqual(fdtd.read_point("Ex", im, j, km), 0.0)
+        for k in (c0, c1):
+            self.assertEqual(fdtd.read_point("Ex", im, jm, k), 0.0)
+        # Ey is tangential on the ±x and ±z faces
+        for i in (a, b):
+            self.assertEqual(fdtd.read_point("Ey", i, jm, km), 0.0)
+        for k in (c0, c1):
+            self.assertEqual(fdtd.read_point("Ey", im, jm, k), 0.0)
+        # Ez is tangential on the ±x and ±y faces
+        for i in (a, b):
+            self.assertEqual(fdtd.read_point("Ez", i, jm, km), 0.0)
+        for j in (a, b):
+            self.assertEqual(fdtd.read_point("Ez", im, j, km), 0.0)
+        # the wave did reach the block (the test is not vacuous)
+        self.assertGreater(abs(fdtd.read_point("Ex", im, jm, c1 + 2)), 1e-4)
 
     def test_pec_with_sigma_array_coexists(self):
         """pec_mask must compose with the lossy path (both coefficient sets zeroed)."""
