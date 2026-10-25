@@ -343,6 +343,12 @@ def write_case_baselines(
     if ocl is None or meep is None:
         ocl, meep = run_case_planes(case)
     assert ocl is not None and meep is not None
+    # Measure exactly what gets committed. The planes are stored as float32
+    # and test_meep_plane_baselines re-measures the stored arrays; metrics
+    # computed from the float64 in-memory planes can differ in the eighth
+    # significant digit after _round_metric and fail the identity check.
+    ocl = {int(k): np.asarray(v, dtype=np.float32) for k, v in ocl.items()}
+    meep = {int(k): np.asarray(v, dtype=np.float32) for k, v in meep.items()}
     rows = measure_case(ocl, meep, npml=case.npml, checkpoints=case.checkpoints)
     meta: dict[str, Any] = {
         "name": case.name,

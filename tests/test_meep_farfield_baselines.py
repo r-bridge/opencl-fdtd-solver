@@ -14,7 +14,11 @@ import unittest
 from pathlib import Path
 
 import numpy as np
+from opencl_fdtd_solver.constants import C0
+from tests.analytic_mie import mie_eplane_intensity
 from tests.meep_validation.farfield_cases import (
+    DL,
+    FREQ,
     default_farfield_cases,
     load_case_farfields_from_baselines,
     run_case_farfields,
@@ -181,7 +185,9 @@ class TestMeepFarfieldBaselines(unittest.TestCase):
         )
 
     def test_discrepancy_quality_gates(self):
-        for case in default_farfield_cases():
+        cases = default_farfield_cases()
+        vacuum = next((c for c in cases if not c.has_dielectric), None)
+        for case in cases:
             with self.subTest(case=case.name):
                 ocl, meep = self.patterns[case.name]
                 err = max_abs_db_error(ocl["S_db"], meep["S_db"], mask_db=-12.0)
@@ -190,16 +196,50 @@ class TestMeepFarfieldBaselines(unittest.TestCase):
                     case.max_main_lobe_db,
                     f"{case.name}: main-lobe |Δ|dB={err:.3f} exceeds gate {case.max_main_lobe_db}",
                 )
-                for tag, main, null in (
-                    ("opencl", ocl["eh_plus_z"], ocl["eh_plus_x"]),
-                    ("meep", meep["eh_plus_z"], meep["eh_plus_x"]),
-                ):
-                    r = float(np.linalg.norm(null[:3]) / (np.linalg.norm(main[:3]) + 1e-30))
-                    self.assertLess(
-                        r,
-                        0.05,
-                        f"{case.name} {tag} |E(+x)|/|E(+z)|={r:.3e}",
-                    )
+                if not case.has_dielectric:
+                    # Endfire (+x) of the Ex source is a true null of the
+                    # total field: both solvers must keep it deep.
+                    for tag, main, null in (
+                        ("opencl", ocl["eh_plus_z"], ocl["eh_plus_x"]),
+                        ("meep", meep["eh_plus_z"], meep["eh_plus_x"]),
+                    ):
+                        r = float(np.linalg.norm(null[:3]) / (np.linalg.norm(main[:3]) + 1e-30))
+                        self.assertLess(r, 0.05, f"{case.name} {tag} |E(+x)|/|E(+z)|={r:.3e}")
+                    continue
+
+                # Dielectric sphere: the scattered field (sphere run minus the
+                # vacuum run on the same grid and source) is compared with the
+                # Mie series, which predicts a finite |E(+x)|/|E(+z)| (the
+                # magnetic-dipole term fills the electric-dipole endfire null).
+                self.assertIsNotNone(vacuum, "dielectric gate needs the vacuum case")
+                vac_ocl, _vac_meep = self.patterns[vacuum.name]
+                ka = 2.0 * np.pi * FREQ / C0 * (case.sphere_rad_cells * DL)
+                intensity = mie_eplane_intensity(
+                    np.sqrt(float(case.sphere_eps)), ka, np.array([0.0, 0.5 * np.pi])
+                )
+                mie_ratio = float(np.sqrt(intensity[1] / intensity[0]))
+                scat_x = ocl["eh_plus_x"][:3] - vac_ocl["eh_plus_x"][:3]
+                scat_z = ocl["eh_plus_z"][:3] - vac_ocl["eh_plus_z"][:3]
+                r = float(np.linalg.norm(scat_x) / (np.linalg.norm(scat_z) + 1e-30))
+                f = case.null_ratio_tolerance_factor
+                self.assertGreater(
+                    r,
+                    mie_ratio / f,
+                    f"{case.name} opencl scattered |E(+x)|/|E(+z)|={r:.3e} is more than "
+                    f"{f:g}× below the Mie value {mie_ratio:.3e} (ka={ka:.3f}): "
+                    "the endfire null is too deep (sphere under-resolved or "
+                    "edge materials placed wrongly)",
+                )
+                self.assertLess(
+                    r,
+                    mie_ratio * f,
+                    f"{case.name} opencl scattered |E(+x)|/|E(+z)|={r:.3e} is more than "
+                    f"{f:g}× above the Mie value {mie_ratio:.3e} (ka={ka:.3f})",
+                )
+                # Meep's near-to-far probe returns ~0 at exactly +x for this
+                # case (vacuum and sphere alike), which the Mie value says is
+                # not the scattered field there; it is recorded in the report
+                # (meep_null_ratio) but not gated against Mie.
 
 
 if __name__ == "__main__":
