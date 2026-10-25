@@ -84,15 +84,28 @@ def _make_solver(eps: np.ndarray | None = None, *, compact_source: bool = False)
 
 
 def _sphere_eps(eps_r: float = 4.0, rad_cells: int = SPHERE_RAD_CELLS) -> np.ndarray:
-    """Staircased εᵣ sphere (cell centers). OpenCL then Yee-edge-averages via set_epsilon."""
+    """Staircased εᵣ sphere centered on the compact source patch.
+
+    The patch (``_center_src_plane``) is Ex on edges ``i0..i1`` of node lines
+    ``j0..j1`` at node plane ``k``: its center sits at ``(ci + ½, cj, ck)`` in
+    grid units, which is a cell center in x but a node in y and z. The sphere
+    is built from cell centers ``(i+½, j+½, k+½)`` about that same point, so
+    the discrete setup keeps the y and z mirror symmetries of the continuous
+    one (Meep centers both at the origin). With all source currents along x
+    and those two mirrors, the far field toward +x vanishes exactly; the
+    golden-baseline gate relies on that. Centering the sphere on cell ``ci``
+    instead offsets it by half a cell in y and z from the patch and radiates
+    a spurious |E(+x)| of several percent once materials are placed on the
+    Yee edges by their owner cells.
+    """
     eps = np.ones(SHAPE, dtype=np.float32)
-    ctr = SHAPE[0] // 2
-    r2 = int(rad_cells) ** 2
-    for i in range(SHAPE[0]):
-        for j in range(SHAPE[1]):
-            for k in range(SHAPE[2]):
-                if (i - ctr) ** 2 + (j - ctr) ** 2 + (k - ctr) ** 2 < r2:
-                    eps[i, j, k] = eps_r
+    i0, i1, j0, j1, k_src = _center_src_plane()
+    cx, cy, cz = 0.5 * (i0 + i1) + 0.5, 0.5 * (j0 + j1), float(k_src)
+    ii, jj, kk = np.ogrid[: SHAPE[0], : SHAPE[1], : SHAPE[2]]
+    inside = (ii + 0.5 - cx) ** 2 + (jj + 0.5 - cy) ** 2 + (kk + 0.5 - cz) ** 2 < float(
+        rad_cells
+    ) ** 2
+    eps[inside] = eps_r
     return eps
 
 

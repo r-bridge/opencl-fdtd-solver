@@ -52,14 +52,14 @@ class FarfieldCase:
     sphere_rad_cells: int = SPHERE_RAD_CELLS
     # Main-lobe |Δ|dB gate (matches test_meep_validation).
     max_main_lobe_db: float = 2.5
-    # Dielectric cases only: |E(+x)|/|E(+z)| of the *scattered* field must lie
-    # within this factor of the Mie-series value on both sides. The endfire
-    # direction of an Ex source is a null for the source itself, but not for a
-    # dielectric sphere (its magnetic-dipole term fills it), so a one-sided
-    # "deep null" ceiling cannot gate the sphere: at ka = 0.838 the exact
-    # scattered ratio is 0.080, and the former axial edge averaging produced a
-    # null three times too deep (0.025) while passing a < 0.05 ceiling.
-    null_ratio_tolerance_factor: float = 2.0
+    # |E(+x)|/|E(+z)| ceiling for both solvers. The compact Ex patch radiates
+    # nothing toward +x (endfire of x-directed currents), and the staircased
+    # sphere is centered on the patch (cases._sphere_eps) so the y/z mirror
+    # symmetries hold in the discrete setup too: the far field at +x is an
+    # exact null for the vacuum and the dielectric case alike. What remains is
+    # near-to-far discretization error (~3 % here); the inverted N/L
+    # combination that this gate was written for destroyed the null outright.
+    max_null_ratio: float = 0.05
 
     @property
     def has_dielectric(self) -> bool:
@@ -181,9 +181,7 @@ def write_case_farfield_baselines(
         "sphere_eps": case.sphere_eps,
         "sphere_rad_cells": case.sphere_rad_cells if case.has_dielectric else 0,
         "max_main_lobe_db": case.max_main_lobe_db,
-        "null_ratio_tolerance_factor": case.null_ratio_tolerance_factor
-        if case.has_dielectric
-        else None,
+        "max_null_ratio": case.max_null_ratio,
         "courant": float(OPENCL_COURANT),
         "source": "soft_Ex_compact_patch",
         "files": [png_name],

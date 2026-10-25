@@ -12,11 +12,11 @@
   "freq_hz": 5000000000.0,
   "fwidth_hz": 1000000000.0,
   "max_main_lobe_db": 2.5,
+  "max_null_ratio": 0.05,
   "n_angles": 19,
   "n_steps": 500,
   "name": "vacuum_farfield",
   "npml": 6,
-  "null_ratio_tolerance_factor": null,
   "shape": [
     30,
     30,
