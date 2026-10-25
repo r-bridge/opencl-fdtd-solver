@@ -220,6 +220,14 @@ class OpenCLFDTD(SourceMonitorMixin):
         Set cell-centered ``εᵣ`` (and optionally conductivity ``σ`` [S/m]);
         store Yee-edge lossy-update coefficients ``ca``, ``ce=cb`` on the GPU.
 
+        Materials are placed on the Yee E-edges by their owner cells: each
+        edge takes the arithmetic mean of ``εᵣ`` (and ``σ``) over the cell
+        with the same index and its predecessors along the two transverse
+        axes — ``Ex[i,j,k]`` at ``(i+½, j, k)`` averages cells
+        ``(i, j-1..j, k-1..k)`` — with only in-domain cells contributing at
+        the boundary (``materials.yee_edge_eps``). The NumPy engines share
+        this interpolation.
+
         ``sigma_array=None`` (default) is the old lossless path: ``ca=1``,
         ``ce = dt/(ε₀ εᵣ)`` exactly as before. Pass ``sigma_array`` (same
         shape as ``eps_array``, S/m) to add ohmic loss — see
