@@ -5,7 +5,12 @@ import operator
 import numpy as np
 
 COURANT_SAFETY_FACTOR = 0.99
-MIN_EPSILON_R = COURANT_SAFETY_FACTOR**2
+# The fixed timestep dt = 0.99*dl/(c0*sqrt(3)) stays inside the 3-D CFL limit
+# for any eps_r >= 0.99**2 = 0.9801. The accepted range is nevertheless
+# eps_r >= 1: this is a nondispersive solver, where eps_r < 1 has no physical
+# meaning, and 1.0 (unlike 0.9801) is exactly representable in float32, so the
+# bound is inclusive for the float32 arrays callers normally pass.
+MIN_EPSILON_R = 1.0
 
 
 def _index(value, name):
@@ -50,7 +55,9 @@ def validate_material_arrays(eps_array, sigma_array, expected_shape):
     if np.any(eps < MIN_EPSILON_R):
         raise ValueError(
             f"Relative permittivity must be at least {MIN_EPSILON_R:g} "
-            f"for the fixed Courant factor {COURANT_SAFETY_FACTOR:g}"
+            "(nondispersive dielectric; values below 1 would also exceed the "
+            f"fixed Courant factor {COURANT_SAFETY_FACTOR:g} below "
+            f"{COURANT_SAFETY_FACTOR**2:g})"
         )
 
     sigma = None

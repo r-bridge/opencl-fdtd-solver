@@ -20,6 +20,7 @@ class TestMaterialValidation(unittest.TestCase):
         invalid_values = (
             (0.0, "Relative permittivity"),
             (-1.0, "Relative permittivity"),
+            (0.9801, "Relative permittivity"),  # CFL-stable but not a dielectric
             (MIN_EPSILON_R - 1e-6, "Relative permittivity"),
             (np.nan, "finite values"),
             (np.inf, "finite values"),
@@ -37,7 +38,11 @@ class TestMaterialValidation(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "real values"):
                     sim.set_epsilon(np.full(shape, 1.0 + 1.0j))
 
+            # The bound is inclusive, and it must stay inclusive for float32:
+            # callers pass float32 arrays, and a threshold that float32 cannot
+            # represent exactly (0.9801 was one) is silently exclusive for them.
             sim.set_epsilon(np.full(shape, MIN_EPSILON_R))
+            sim.set_epsilon(np.full(shape, MIN_EPSILON_R, dtype=np.float32))
 
     def test_conductivity_must_be_finite_and_nonnegative(self):
         shape = (4, 4, 4)

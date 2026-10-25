@@ -234,9 +234,10 @@ class OpenCLFDTD(SourceMonitorMixin):
         the boundary (``materials.yee_edge_eps``). The NumPy engines share
         this interpolation.
 
-        Relative permittivity must be finite and at least 0.9801 so the fixed
-        vacuum-based timestep remains within the 3-D CFL limit. Conductivity
-        must be finite and nonnegative.
+        Relative permittivity must be finite and at least 1 (nondispersive
+        dielectric; the fixed vacuum-based timestep would leave the 3-D CFL
+        limit below 0.9801 anyway). Conductivity must be finite and
+        nonnegative.
 
         ``sigma_array=None`` (default) is the old lossless path: ``ca=1``,
         ``ce = dt/(ε₀ εᵣ)`` exactly as before. Pass ``sigma_array`` (same

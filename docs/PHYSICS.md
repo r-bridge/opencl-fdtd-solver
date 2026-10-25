@@ -115,10 +115,13 @@ S = \frac{0.99}{\sqrt{3}}\approx 0.5716,\qquad
 \Delta t = S\,\frac{\Delta\ell}{c_0} = 0.99\,\frac{\Delta\ell}{c_0\sqrt{3}}.
 \]
 
-Because this fixed timestep is based on vacuum wave speed, accepted cell-wise
-relative permittivity is finite and \(\varepsilon_r\ge 0.99^2=0.9801\);
-conductivity must be finite and nonnegative. The solver rejects values outside
-these bounds rather than silently running beyond the 3-D CFL limit.
+Because this fixed timestep is based on the vacuum wave speed, it leaves the
+3-D CFL limit for \(\varepsilon_r < 0.99^2 = 0.9801\). The solver accepts
+only finite \(\varepsilon_r \ge 1\) (it models nondispersive dielectrics, for
+which \(\varepsilon_r < 1\) has no meaning, and 1 is exactly representable in
+float32 so the bound is inclusive for the arrays callers pass) and finite,
+nonnegative conductivity; values outside these bounds are rejected rather than
+silently run unstable.
 
 Meep comparisons force the **same** Courant (Meep’s own default is 0.5). Changing \(S\) without matching the reference invalidates amplitude/phase comparisons.
 

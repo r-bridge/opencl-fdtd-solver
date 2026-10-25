@@ -75,8 +75,8 @@ class NumPyFDTD(SourceMonitorMixin):
         Edge placement matches ``OpenCLFDTD``: each Yee E-edge averages the
         four cells that own it (``materials.yee_edge_eps``). Conductivity and
         PEC masks are OpenCL-only. Relative permittivity must be finite and at
-        least 0.9801 so the fixed vacuum-based timestep remains within the
-        3-D CFL limit.
+        least 1 (nondispersive dielectric; the fixed vacuum-based timestep
+        would leave the 3-D CFL limit below 0.9801 anyway).
         """
         expected = (self.Nx, self.Ny, self.Nz)
         eps_array, _ = validate_material_arrays(eps_array, None, expected)
