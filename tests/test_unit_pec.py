@@ -1,6 +1,6 @@
 """
 Coverage for perfect-electric-conductor cells (materials.yee_edge_pec,
-EngineFDTD.set_epsilon(pec_mask=)), added for foil-like reflectors whose
+OpenCLFDTD.set_epsilon(pec_mask=)), added for foil-like reflectors whose
 skin depth is far below the grid step (a finite sigma there would need the
 skin depth resolved; see the set_epsilon docstring).
 """
@@ -89,6 +89,22 @@ class TestYeeEdgePec(unittest.TestCase):
         yee_edge_pec(m)
         np.testing.assert_array_equal(m, m0)
 
+    def test_non_3d_mask_raises(self):
+        """yee_edge_pec requires a 3-dimensional mask array."""
+        with self.assertRaises(ValueError):
+            yee_edge_pec(np.zeros((4, 4), dtype=bool))
+        with self.assertRaises(ValueError):
+            yee_edge_pec(np.zeros((2, 2, 2, 2), dtype=bool))
+
+    def test_upper_domain_boundary_is_clipped(self):
+        """A PEC cell at the upper corner clips at domain bounds without error."""
+        m = np.zeros((3, 3, 3), dtype=bool)
+        m[2, 2, 2] = True
+        mx, my, mz = yee_edge_pec(m)
+        self.assertEqual(set(map(tuple, np.argwhere(mx))), {(2, 2, 2)})
+        self.assertEqual(set(map(tuple, np.argwhere(my))), {(2, 2, 2)})
+        self.assertEqual(set(map(tuple, np.argwhere(mz))), {(2, 2, 2)})
+
 
 class TestEnginePec(unittest.TestCase):
     @classmethod
@@ -111,7 +127,7 @@ class TestEnginePec(unittest.TestCase):
         fdtd.set_epsilon(eps, pec_mask=pec)
 
         z_src = shape[2] - npml - 2
-        fdtd.add_source(lambda f: f.add_source_Ex(z_src, np.sin(2 * np.pi * freq * f.t)))
+        fdtd.add_source(lambda f: f.add_source_Jx(z_src, np.sin(2 * np.pi * freq * f.t)))
         fdtd.run(160)
 
         c = shape[0] // 2
@@ -136,7 +152,7 @@ class TestEnginePec(unittest.TestCase):
         pec[a:b, a:b, c0:c1] = True
         fdtd.set_epsilon(eps, pec_mask=pec)
         z_src = shape[2] - npml - 2
-        fdtd.add_source(lambda f: f.add_source_Ex(z_src, np.sin(2 * np.pi * 10e9 * f.t)))
+        fdtd.add_source(lambda f: f.add_source_Jx(z_src, np.sin(2 * np.pi * 10e9 * f.t)))
         fdtd.run(140)
 
         im, jm, km = (a + b) // 2, (a + b) // 2, (c0 + c1) // 2

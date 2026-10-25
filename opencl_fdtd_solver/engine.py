@@ -245,10 +245,19 @@ class OpenCLFDTD(SourceMonitorMixin):
             )
         if sigma_array is None:
             ce_x, ce_y, ce_z = yee_edge_ce(eps_array, self.dt, dtype=self.dtype)
+            cb_x, cb_y, cb_z = ce_x, ce_y, ce_z
+            if pec_mask is None:
+                ca_lossless = np.ones(self.size, dtype=self.dtype)
+                cl.enqueue_copy(self.queue, self.ce_x_buf, cb_x.ravel())
+                cl.enqueue_copy(self.queue, self.ce_y_buf, cb_y.ravel())
+                cl.enqueue_copy(self.queue, self.ce_z_buf, cb_z.ravel())
+                cl.enqueue_copy(self.queue, self.ca_x_buf, ca_lossless)
+                cl.enqueue_copy(self.queue, self.ca_y_buf, ca_lossless)
+                cl.enqueue_copy(self.queue, self.ca_z_buf, ca_lossless)
+                return
             ca_x = np.ones((self.Nx, self.Ny, self.Nz), dtype=self.dtype)
             ca_y = ca_x.copy()
             ca_z = ca_x.copy()
-            cb_x, cb_y, cb_z = ce_x, ce_y, ce_z
         else:
             if sigma_array.shape != expected:
                 raise ValueError(

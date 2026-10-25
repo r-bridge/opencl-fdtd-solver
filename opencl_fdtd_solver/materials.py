@@ -71,7 +71,7 @@ def yee_edge_pec(mask: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     instead would clamp collinear edges outside the cell and leave the
     enclosing transverse edges free.)
 
-    Used by ``EngineFDTD.set_epsilon(pec_mask=)`` to pin those edges to
+    Used by ``OpenCLFDTD.set_epsilon(pec_mask=)`` to pin those edges to
     E = 0 (``ca = ce = 0``), the correct σ→∞ limit — feeding a huge σ into
     ``yee_edge_ca_cb`` instead drives ``Ca → −1`` (sign-flipping, stable but
     wrong), and a huge lossless εᵣ demands resolving the internal
@@ -79,6 +79,8 @@ def yee_edge_pec(mask: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     E = 0 at any grid resolution.
     """
     m = np.asarray(mask, dtype=bool)
+    if m.ndim != 3:
+        raise ValueError(f"PEC mask must be 3-dimensional, got {m.ndim}D")
 
     def _or_prev(a: np.ndarray, axis: int) -> np.ndarray:
         """OR each cell with its predecessor along ``axis`` (index 0 keeps itself)."""

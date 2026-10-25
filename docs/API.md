@@ -123,7 +123,7 @@ NumPyFDTD(shape, dl, npml=20, dtype=np.float32, psi_dtype=None)
 ```
 
 Same lossless Yee/CPML physics and source/monitor control flow as OpenCL.
-`set_epsilon(eps_array)` accepts εᵣ only; ohmic conductivity is currently
+`set_epsilon(eps_array)` accepts εᵣ only; ohmic conductivity and pec_mask are currently
 OpenCL-only. Grid and sheet validation match OpenCL. CPML ψ arrays are
 **full volume** (`Nx×Ny×Nz` × 12). Optional `psi_dtype` (e.g. `float16`)
 reduces ψ memory at the cost of precision; that dtype is retained across steps.
