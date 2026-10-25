@@ -11,8 +11,22 @@ import os
 import unittest
 
 import numpy as np
+import pyopencl as cl
 from opencl_fdtd_solver import OpenCLFDTD
-from opencl_fdtd_solver.materials import yee_edge_pec
+from opencl_fdtd_solver.materials import yee_edge_ca_cb, yee_edge_ce, yee_edge_eps, yee_edge_pec
+
+COEFF_NAMES = ("ca_x", "ca_y", "ca_z", "ce_x", "ce_y", "ce_z")
+
+
+def _download_coefficients(fdtd: OpenCLFDTD) -> dict[str, np.ndarray]:
+    """Read the six uploaded E-update coefficient buffers back from the device."""
+    out = {}
+    for name in COEFF_NAMES:
+        host = np.empty(fdtd.size, dtype=fdtd.dtype)
+        cl.enqueue_copy(fdtd.queue, host, getattr(fdtd, f"{name}_buf"))
+        fdtd.queue.finish()
+        out[name] = host.reshape(fdtd.Nx, fdtd.Ny, fdtd.Nz)
+    return out
 
 
 class TestYeeEdgePec(unittest.TestCase):
@@ -144,18 +158,78 @@ class TestEnginePec(unittest.TestCase):
         # the wave did reach the block (the test is not vacuous)
         self.assertGreater(abs(fdtd.read_point("Ex", im, jm, c1 + 2)), 1e-4)
 
-    def test_pec_with_sigma_array_coexists(self):
-        """pec_mask must compose with the lossy path (both coefficient sets zeroed)."""
+    def test_uploaded_coefficients_lossless_plus_pec(self):
+        """Lossless path + PEC: ca = 1 and ce = dt/(eps0 eps_r) everywhere except
+        on the PEC edges, where both are exactly zero. Asserted on the buffers
+        the kernels actually read, not on (initially zero) fields."""
         shape = (12, 12, 12)
         fdtd = OpenCLFDTD(shape, 1e-3, npml=3)
         eps = np.ones(shape, dtype=np.float32)
-        sigma = np.zeros(shape, dtype=np.float32)
-        sigma[:, :, 4:6] = 5.0
+        eps[:, :, :6] = 2.5
         pec = np.zeros(shape, dtype=bool)
-        pec[:, :, 8:9] = True
+        pec[3:9, 3:9, 7:9] = True
+        fdtd.set_epsilon(eps, pec_mask=pec)
+
+        got = _download_coefficients(fdtd)
+        ce = dict(zip("xyz", yee_edge_ce(eps, fdtd.dt, dtype=fdtd.dtype)))
+        pm = dict(zip("xyz", yee_edge_pec(pec)))
+        for c in "xyz":
+            self.assertTrue(pm[c].any())
+            exp_ca = np.ones(shape, dtype=fdtd.dtype)
+            exp_ca[pm[c]] = 0
+            exp_ce = ce[c].copy()
+            exp_ce[pm[c]] = 0
+            np.testing.assert_array_equal(got[f"ca_{c}"], exp_ca)
+            np.testing.assert_array_equal(got[f"ce_{c}"], exp_ce)
+            # not vacuous: outside the conductor the update is live
+            self.assertTrue((got[f"ce_{c}"][~pm[c]] > 0).all())
+
+    def test_uploaded_coefficients_sigma_plus_pec(self):
+        """Lossy path + PEC, with a region where conductivity and PEC overlap:
+        lossy edges carry the trapezoidal Ca/Cb, PEC edges are zero in all six
+        buffers, and PEC wins wherever both apply."""
+        shape = (12, 12, 12)
+        fdtd = OpenCLFDTD(shape, 1e-3, npml=3)
+        eps = np.ones(shape, dtype=np.float32)
+        eps[:, :, :6] = 2.5
+        sigma = np.zeros(shape, dtype=np.float32)
+        sigma[:, :, 4:6] = 5.0  # lossy slab, no PEC
+        sigma[:, :, 8:9] = 3.0  # lossy slab that the PEC block overlaps
+        pec = np.zeros(shape, dtype=bool)
+        pec[3:9, 3:9, 8:9] = True
+        overlap = pec & (sigma > 0)
+        self.assertTrue(overlap.any())
         fdtd.set_epsilon(eps, sigma_array=sigma, pec_mask=pec)
-        fdtd.run(10)
-        self.assertEqual(fdtd.read_point("Ex", 6, 6, 8), 0.0)
+
+        got = _download_coefficients(fdtd)
+        (ca_x, ca_y, ca_z), (cb_x, cb_y, cb_z) = yee_edge_ca_cb(
+            eps, sigma, fdtd.dt, dtype=fdtd.dtype
+        )
+        ca = {"x": ca_x, "y": ca_y, "z": ca_z}
+        cb = {"x": cb_x, "y": cb_y, "z": cb_z}
+        pm = dict(zip("xyz", yee_edge_pec(pec)))
+        om = dict(zip("xyz", yee_edge_pec(overlap)))
+        lossy = dict(zip("xyz", (s > 0 for s in yee_edge_eps(sigma))))
+        for c in "xyz":
+            exp_ca = ca[c].copy()
+            exp_ca[pm[c]] = 0
+            exp_cb = cb[c].copy()
+            exp_cb[pm[c]] = 0
+            np.testing.assert_array_equal(got[f"ca_{c}"], exp_ca)
+            np.testing.assert_array_equal(got[f"ce_{c}"], exp_cb)
+            # loss actually applied on lossy non-PEC edges (Ca < 1), lossless
+            # non-PEC edges untouched (Ca == 1), PEC edges dead in both buffers
+            live_lossy = lossy[c] & ~pm[c]
+            live_clean = ~lossy[c] & ~pm[c]
+            self.assertTrue(live_lossy.any() and live_clean.any())
+            self.assertTrue((got[f"ca_{c}"][live_lossy] < 1).all())
+            self.assertTrue((got[f"ca_{c}"][live_clean] == 1).all())
+            self.assertTrue((got[f"ca_{c}"][pm[c]] == 0).all())
+            self.assertTrue((got[f"ce_{c}"][pm[c]] == 0).all())
+            # PEC takes precedence where conductivity and PEC overlap
+            self.assertTrue(om[c].any())
+            self.assertTrue((got[f"ca_{c}"][om[c]] == 0).all())
+            self.assertTrue((got[f"ce_{c}"][om[c]] == 0).all())
 
     def test_pec_mask_shape_mismatch_raises(self):
         """A mask that does not match the grid is rejected before any upload."""
