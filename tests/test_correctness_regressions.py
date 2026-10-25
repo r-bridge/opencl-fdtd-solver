@@ -106,6 +106,16 @@ class TestInputAndMemory(unittest.TestCase):
 
 
 class TestSourceAndPrecision(unittest.TestCase):
+    def test_numpy_volume_update_scratch_is_reused(self):
+        s = NumPyFDTD((8, 8, 8), 1e-3, npml=2)
+        s.step()
+        scratch = s._update_scratch
+        self.assertIsNotNone(scratch)
+        s.step()
+        self.assertIs(s._update_scratch, scratch)
+        for array in scratch:
+            self.assertEqual(array.shape, s.Ex.shape)
+
     def test_conductive_drive_matches_uniform_ampere_recurrence(self):
         shape = (8, 8, 8)
         for loss_target in (0, 0.25, 1, 2):
