@@ -34,7 +34,15 @@ def validate_grid(shape, dl, npml):
 
 
 def validate_material_arrays(eps_array, sigma_array, expected_shape):
-    """Return real material arrays after validating shape, values, and CFL bound."""
+    """Return ``(eps, sigma)`` after validating shape, values, and the εᵣ bound.
+
+    Each array is checked on a float64 working copy (realness, finiteness,
+    ``eps >= MIN_EPSILON_R``, ``sigma >= 0``). Inputs that are already real
+    numeric NumPy arrays (bool, integer or float dtype) are returned as the
+    caller's own object, so no second copy of a large grid is kept alive;
+    anything else (nested lists, object arrays) comes back as the float64
+    copy. Callers convert to their working dtype themselves.
+    """
 
     def _real_array(values, name):
         if np.iscomplexobj(values):

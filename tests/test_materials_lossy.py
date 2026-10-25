@@ -9,7 +9,7 @@ import unittest
 
 import numpy as np
 from opencl_fdtd_solver import NumPyFDTD, OpenCLFDTD
-from opencl_fdtd_solver._validation import MIN_EPSILON_R
+from opencl_fdtd_solver._validation import MIN_EPSILON_R, validate_material_arrays
 from opencl_fdtd_solver.constants import EPS0
 from opencl_fdtd_solver.materials import yee_edge_ca_cb, yee_edge_ce, yee_edge_eps
 
@@ -43,6 +43,23 @@ class TestMaterialValidation(unittest.TestCase):
             # represent exactly (0.9801 was one) is silently exclusive for them.
             sim.set_epsilon(np.full(shape, MIN_EPSILON_R))
             sim.set_epsilon(np.full(shape, MIN_EPSILON_R, dtype=np.float32))
+
+    def test_numeric_arrays_are_returned_without_a_copy(self):
+        """Validation must not hold a float64 duplicate of a large grid: a real
+        numeric input array comes back as the same object, and only non-array
+        inputs are materialised as float64."""
+        shape = (4, 4, 4)
+        for dtype in (np.float32, np.float64, np.int32, np.bool_):
+            with self.subTest(dtype=dtype.__name__):
+                eps = np.ones(shape, dtype=dtype)
+                sigma = np.zeros(shape, dtype=dtype)
+                out_eps, out_sigma = validate_material_arrays(eps, sigma, shape)
+                self.assertIs(out_eps, eps)
+                self.assertIs(out_sigma, sigma)
+        out_eps, out_sigma = validate_material_arrays([[[1.5] * 4] * 4] * 4, None, shape)
+        self.assertEqual(out_eps.dtype, np.float64)
+        self.assertEqual(out_eps.shape, shape)
+        self.assertIsNone(out_sigma)
 
     def test_conductivity_must_be_finite_and_nonnegative(self):
         shape = (4, 4, 4)
