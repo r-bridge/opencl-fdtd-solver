@@ -83,7 +83,7 @@ PyOpenCL's `create_some_context`, not by the solver's default discovery.
 
 | Method | Notes |
 |---|---|
-| `set_epsilon(eps_array, sigma_array=None, pec_mask=None)` | Cell-wise scalar εᵣ and optional ohmic σ (S/m), both shape `(Nx,Ny,Nz)`; builds Yee-edge `Ca`, `Cb` coefficients. Each E-edge takes the arithmetic mean of εᵣ (and σ) over the four cells that own it, the cell with the same index and its predecessors along the two transverse axes (`Ex[i,j,k]` at `(i+½, j, k)` averages cells `(i, j−1..j, k−1..k)`); at the domain boundary only in-domain cells contribute. Optional `pec_mask` (bool, same shape) marks perfect-conductor cells: all 12 Yee E-edges on each masked cell's boundary get `Ca = Cb = 0`, pinning tangential E to zero exactly on the closed cell surface. Use it for metal surfaces whose skin depth is far below the grid step; a finite σ there would need the skin depth resolved |
+| `set_epsilon(eps_array, sigma_array=None, pec_mask=None)` | Cell-wise scalar εᵣ and optional ohmic σ (S/m), both shape `(Nx,Ny,Nz)`; εᵣ must be finite and ≥ 1 (nondispersive dielectric; the fixed 0.99 vacuum-based Courant factor would in any case be violated below 0.9801), and σ must be finite and nonnegative. Builds Yee-edge `Ca`, `Cb` coefficients. Each E-edge takes the arithmetic mean of εᵣ (and σ) over the four cells that own it, the cell with the same index and its predecessors along the two transverse axes (`Ex[i,j,k]` at `(i+½, j, k)` averages cells `(i, j−1..j, k−1..k)`); at the domain boundary only in-domain cells contribute. Optional `pec_mask` (bool, same shape) marks perfect-conductor cells: all 12 Yee E-edges on each masked cell's boundary get `Ca = Cb = 0`, pinning tangential E to zero exactly on the closed cell surface. Use it for metal surfaces whose skin depth is far below the grid step; a finite σ there would need the skin depth resolved |
 | `add_source_Jx(z_src, Jx, i0=None, i1=None, j0=None, j1=None, *, rim_taper=False, rim_edge=0.8, rim_renorm=True)` | SI Jx (A/m²) on a constant-z Ex sheet: `Ex += -Cb*Jx`; lossless `Cb=dt/(ε₀ εᵣ)` |
 | `add_source_Ex(…)` | **Deprecated** soft Ex add; prefer `add_source_Jx` |
 | `step()` | One Yee step (H → sources → E → monitors) |
@@ -125,7 +125,8 @@ NumPyFDTD(shape, dl, npml=20, dtype=np.float32, psi_dtype=None)
 Same lossless Yee/CPML physics and source/monitor control flow as OpenCL.
 `set_epsilon(eps_array)` accepts εᵣ only and places it on Yee edges with the same
 four-owner-cell averaging as OpenCL (shared `materials.yee_edge_ce`); ohmic
-conductivity and pec_mask are currently OpenCL-only. Grid and sheet validation match OpenCL. CPML ψ arrays are
+conductivity and pec_mask are currently OpenCL-only. εᵣ values must be finite
+and ≥ 1. Grid, material, and sheet validation match OpenCL. CPML ψ arrays are
 **full volume** (`Nx×Ny×Nz` × 12). Optional `psi_dtype` (e.g. `float16`)
 reduces ψ memory at the cost of precision; that dtype is retained across steps.
 

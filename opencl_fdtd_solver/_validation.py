@@ -4,6 +4,14 @@ import operator
 
 import numpy as np
 
+COURANT_SAFETY_FACTOR = 0.99
+# The fixed timestep dt = 0.99*dl/(c0*sqrt(3)) stays inside the 3-D CFL limit
+# for any eps_r >= 0.99**2 = 0.9801. The accepted range is nevertheless
+# eps_r >= 1: this is a nondispersive solver, where eps_r < 1 has no physical
+# meaning, and 1.0 (unlike 0.9801) is exactly representable in float32, so the
+# bound is inclusive for the float32 arrays callers normally pass.
+MIN_EPSILON_R = 1.0
+
 
 def _index(value, name):
     try:
@@ -23,6 +31,50 @@ def validate_grid(shape, dl, npml):
     if npml < 0 or 2 * npml > min(shape):
         raise ValueError("npml must be nonnegative and 2*npml must not exceed any grid dimension")
     return shape, dl, npml
+
+
+def validate_material_arrays(eps_array, sigma_array, expected_shape):
+    """Return ``(eps, sigma)`` after validating shape, values, and the εᵣ bound.
+
+    Each array is checked on a float64 working copy (realness, finiteness,
+    ``eps >= MIN_EPSILON_R``, ``sigma >= 0``). Inputs that are already real
+    numeric NumPy arrays (bool, integer or float dtype) are returned as the
+    caller's own object, so no second copy of a large grid is kept alive;
+    anything else (nested lists, object arrays) comes back as the float64
+    copy. Callers convert to their working dtype themselves.
+    """
+
+    def _real_array(values, name):
+        if np.iscomplexobj(values):
+            raise ValueError(f"{name} must contain real values")
+        try:
+            array = np.asarray(values, dtype=np.float64)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must contain real numeric values") from exc
+        if array.shape != expected_shape:
+            raise ValueError(
+                f"{name} shape mismatch: expected {expected_shape}, got {tuple(array.shape)}"
+            )
+        if not np.all(np.isfinite(array)):
+            raise ValueError(f"{name} must contain only finite values")
+        original = np.asarray(values)
+        return original if original.dtype.kind in "biuf" else array
+
+    eps = _real_array(eps_array, "Epsilon")
+    if np.any(eps < MIN_EPSILON_R):
+        raise ValueError(
+            f"Relative permittivity must be at least {MIN_EPSILON_R:g} "
+            "(nondispersive dielectric; values below 1 would also exceed the "
+            f"fixed Courant factor {COURANT_SAFETY_FACTOR:g} below "
+            f"{COURANT_SAFETY_FACTOR**2:g})"
+        )
+
+    sigma = None
+    if sigma_array is not None:
+        sigma = _real_array(sigma_array, "Sigma")
+        if np.any(sigma < 0):
+            raise ValueError("Conductivity must be nonnegative")
+    return eps, sigma
 
 
 def source_sheet(shape, z, i0, i1, j0, j1):

@@ -16,10 +16,11 @@ import tempfile
 from typing import Any
 
 import numpy as np
+from opencl_fdtd_solver._validation import COURANT_SAFETY_FACTOR
 from opencl_fdtd_solver.constants import C0, EPS0
 
 # Match OpenCLFDTD: dt = S * dl / c with S = 0.99/sqrt(3). Meep default is 0.5.
-OPENCL_COURANT = 0.99 / float(np.sqrt(3.0))
+OPENCL_COURANT = COURANT_SAFETY_FACTOR / float(np.sqrt(3.0))
 # Length unit used in Meep comparison scripts (metres per Meep length unit).
 MEEP_LENGTH_M = 1e-3
 

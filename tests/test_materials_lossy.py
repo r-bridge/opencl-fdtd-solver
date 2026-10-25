@@ -8,9 +8,76 @@ from __future__ import annotations
 import unittest
 
 import numpy as np
-from opencl_fdtd_solver import OpenCLFDTD
+from opencl_fdtd_solver import NumPyFDTD, OpenCLFDTD
+from opencl_fdtd_solver._validation import MIN_EPSILON_R, validate_material_arrays
 from opencl_fdtd_solver.constants import EPS0
 from opencl_fdtd_solver.materials import yee_edge_ca_cb, yee_edge_ce, yee_edge_eps
+
+
+class TestMaterialValidation(unittest.TestCase):
+    def test_epsilon_must_be_finite_positive_and_cfl_safe(self):
+        shape = (4, 4, 4)
+        invalid_values = (
+            (0.0, "Relative permittivity"),
+            (-1.0, "Relative permittivity"),
+            (0.9801, "Relative permittivity"),  # CFL-stable but not a dielectric
+            (MIN_EPSILON_R - 1e-6, "Relative permittivity"),
+            (np.nan, "finite values"),
+            (np.inf, "finite values"),
+            (-np.inf, "finite values"),
+        )
+
+        for solver_cls in (NumPyFDTD, OpenCLFDTD):
+            sim = solver_cls(shape, 1e-3, npml=1)
+            for value, message in invalid_values:
+                with self.subTest(solver=solver_cls.__name__, epsilon=value):
+                    with self.assertRaisesRegex(ValueError, message):
+                        sim.set_epsilon(np.full(shape, value))
+
+            with self.subTest(solver=solver_cls.__name__, epsilon="complex"):
+                with self.assertRaisesRegex(ValueError, "real values"):
+                    sim.set_epsilon(np.full(shape, 1.0 + 1.0j))
+
+            # The bound is inclusive, and it must stay inclusive for float32:
+            # callers pass float32 arrays, and a threshold that float32 cannot
+            # represent exactly (0.9801 was one) is silently exclusive for them.
+            sim.set_epsilon(np.full(shape, MIN_EPSILON_R))
+            sim.set_epsilon(np.full(shape, MIN_EPSILON_R, dtype=np.float32))
+
+    def test_numeric_arrays_are_returned_without_a_copy(self):
+        """Validation must not hold a float64 duplicate of a large grid: a real
+        numeric input array comes back as the same object, and only non-array
+        inputs are materialised as float64."""
+        shape = (4, 4, 4)
+        for dtype in (np.float32, np.float64, np.int32, np.bool_):
+            with self.subTest(dtype=dtype.__name__):
+                eps = np.ones(shape, dtype=dtype)
+                sigma = np.zeros(shape, dtype=dtype)
+                out_eps, out_sigma = validate_material_arrays(eps, sigma, shape)
+                self.assertIs(out_eps, eps)
+                self.assertIs(out_sigma, sigma)
+        out_eps, out_sigma = validate_material_arrays([[[1.5] * 4] * 4] * 4, None, shape)
+        self.assertEqual(out_eps.dtype, np.float64)
+        self.assertEqual(out_eps.shape, shape)
+        self.assertIsNone(out_sigma)
+
+    def test_conductivity_must_be_finite_and_nonnegative(self):
+        shape = (4, 4, 4)
+        sim = OpenCLFDTD(shape, 1e-3, npml=1)
+        eps = np.ones(shape)
+
+        for value, message in (
+            (-1.0, "nonnegative"),
+            (np.nan, "finite"),
+            (np.inf, "finite"),
+            (-np.inf, "finite"),
+        ):
+            with self.subTest(conductivity=value):
+                with self.assertRaisesRegex(ValueError, message):
+                    sim.set_epsilon(eps, sigma_array=np.full(shape, value))
+
+        with self.assertRaisesRegex(ValueError, "real values"):
+            sim.set_epsilon(eps, sigma_array=np.full(shape, 1.0 + 1.0j))
 
 
 class TestYeeEdgeMaterialAveraging(unittest.TestCase):
