@@ -66,6 +66,7 @@ class NumPyFDTD(SourceMonitorMixin):
 
         self._sources = []
         self._monitors = []
+        self._update_scratch = None
 
         self._build_cpml()
 
@@ -211,78 +212,186 @@ class NumPyFDTD(SourceMonitorMixin):
             d[:, :, 1:] = F[:, :, 1:] - F[:, :, :-1]
         return d
 
+    def _ensure_update_scratch(self):
+        if self._update_scratch is None:
+            work_dtype = np.result_type(self.dtype, self.psi_dtype)
+            self._update_scratch = tuple(
+                np.empty((self.Nx, self.Ny, self.Nz), dtype=work_dtype) for _ in range(4)
+            )
+
+    @staticmethod
+    def _difference_into(field, axis, forward, out):
+        out.fill(0)
+        dst = [slice(None)] * 3
+        src_a = [slice(None)] * 3
+        src_b = [slice(None)] * 3
+        if forward:
+            dst[axis] = slice(None, -1)
+            src_a[axis] = slice(1, None)
+            src_b[axis] = slice(None, -1)
+        else:
+            dst[axis] = slice(1, None)
+            src_a[axis] = slice(1, None)
+            src_b[axis] = slice(None, -1)
+        np.subtract(field[tuple(src_a)], field[tuple(src_b)], out=out[tuple(dst)])
+
+    def _update_psi(self, psi, b, c, derivative, work_a, work_b):
+        np.multiply(psi, b, out=work_a)
+        np.multiply(derivative, c, out=work_b)
+        np.add(work_a, work_b, out=work_a)
+        np.copyto(psi, work_a, casting="unsafe")
+
+    def _apply_curl(
+        self, field, derivative_a, derivative_b, kappa_a, kappa_b, psi_a, psi_b, scale, add
+    ):
+        np.divide(derivative_a, kappa_a * self.dl, out=derivative_a)
+        np.add(derivative_a, psi_a, out=derivative_a)
+        np.divide(derivative_b, kappa_b * self.dl, out=derivative_b)
+        np.add(derivative_b, psi_b, out=derivative_b)
+        np.subtract(derivative_a, derivative_b, out=derivative_a)
+        if add:
+            np.multiply(derivative_a, scale, out=derivative_a)
+            np.add(field, derivative_a, out=field)
+        else:
+            np.multiply(derivative_a, scale, out=derivative_a)
+            np.subtract(field, derivative_a, out=field)
+
     def _update_H(self):
+        self._ensure_update_scratch()
+        d_a, d_b, work_a, work_b = self._update_scratch
         dtm = self.dt / MU0
         Ex, Ey, Ez = self.Ex, self.Ey, self.Ez
 
-        dEz_dy = self._fwd(Ez, 1)
-        dEy_dz = self._fwd(Ey, 2)
-        dEx_dz = self._fwd(Ex, 2)
-        dEz_dx = self._fwd(Ez, 0)
-        dEy_dx = self._fwd(Ey, 0)
-        dEx_dy = self._fwd(Ex, 1)
-
-        self._psi_Hx_y[...] = self._by_h * self._psi_Hx_y + self._cy_h * dEz_dy
-        self._psi_Hx_z[...] = self._bz_h * self._psi_Hx_z + self._cz_h * dEy_dz
-        self._psi_Hy_x[...] = self._bx_h * self._psi_Hy_x + self._cx_h * dEz_dx
-        self._psi_Hy_z[...] = self._bz_h * self._psi_Hy_z + self._cz_h * dEx_dz
-        self._psi_Hz_x[...] = self._bx_h * self._psi_Hz_x + self._cx_h * dEy_dx
-        self._psi_Hz_y[...] = self._by_h * self._psi_Hz_y + self._cy_h * dEx_dy
-
-        self.Hx -= dtm * (
-            dEz_dy / (self._ky_h * self.dl)
-            + self._psi_Hx_y
-            - dEy_dz / (self._kz_h * self.dl)
-            - self._psi_Hx_z
-        )
-        self.Hy -= dtm * (
-            dEx_dz / (self._kz_h * self.dl)
-            + self._psi_Hy_z
-            - dEz_dx / (self._kx_h * self.dl)
-            - self._psi_Hy_x
-        )
-        self.Hz -= dtm * (
-            dEy_dx / (self._kx_h * self.dl)
-            + self._psi_Hz_x
-            - dEx_dy / (self._ky_h * self.dl)
-            - self._psi_Hz_y
-        )
+        for field, f_a, axis_a, f_b, axis_b, kappa_a, kappa_b, psi_a, psi_b, b_a, c_a, b_b, c_b in (
+            (
+                self.Hx,
+                Ez,
+                1,
+                Ey,
+                2,
+                self._ky_h,
+                self._kz_h,
+                self._psi_Hx_y,
+                self._psi_Hx_z,
+                self._by_h,
+                self._cy_h,
+                self._bz_h,
+                self._cz_h,
+            ),
+            (
+                self.Hy,
+                Ex,
+                2,
+                Ez,
+                0,
+                self._kz_h,
+                self._kx_h,
+                self._psi_Hy_z,
+                self._psi_Hy_x,
+                self._bz_h,
+                self._cz_h,
+                self._bx_h,
+                self._cx_h,
+            ),
+            (
+                self.Hz,
+                Ey,
+                0,
+                Ex,
+                1,
+                self._kx_h,
+                self._ky_h,
+                self._psi_Hz_x,
+                self._psi_Hz_y,
+                self._bx_h,
+                self._cx_h,
+                self._by_h,
+                self._cy_h,
+            ),
+        ):
+            self._difference_into(f_a, axis_a, True, d_a)
+            self._difference_into(f_b, axis_b, True, d_b)
+            if self.npml > 0:
+                self._update_psi(psi_a, b_a, c_a, d_a, work_a, work_b)
+                self._update_psi(psi_b, b_b, c_b, d_b, work_a, work_b)
+            self._apply_curl(field, d_a, d_b, kappa_a, kappa_b, psi_a, psi_b, dtm, add=False)
 
     def _update_E(self):
+        self._ensure_update_scratch()
+        d_a, d_b, work_a, work_b = self._update_scratch
         Hx, Hy, Hz = self.Hx, self.Hy, self.Hz
 
-        dHz_dy = self._bwd(Hz, 1)
-        dHy_dz = self._bwd(Hy, 2)
-        dHx_dz = self._bwd(Hx, 2)
-        dHz_dx = self._bwd(Hz, 0)
-        dHy_dx = self._bwd(Hy, 0)
-        dHx_dy = self._bwd(Hx, 1)
-
-        self._psi_Ex_y[...] = self._by_e * self._psi_Ex_y + self._cy_e * dHz_dy
-        self._psi_Ex_z[...] = self._bz_e * self._psi_Ex_z + self._cz_e * dHy_dz
-        self._psi_Ey_x[...] = self._bx_e * self._psi_Ey_x + self._cx_e * dHz_dx
-        self._psi_Ey_z[...] = self._bz_e * self._psi_Ey_z + self._cz_e * dHx_dz
-        self._psi_Ez_x[...] = self._bx_e * self._psi_Ez_x + self._cx_e * dHy_dx
-        self._psi_Ez_y[...] = self._by_e * self._psi_Ez_y + self._cy_e * dHx_dy
-
-        self.Ex += self._ce_x * (
-            dHz_dy / (self._ky_e * self.dl)
-            + self._psi_Ex_y
-            - dHy_dz / (self._kz_e * self.dl)
-            - self._psi_Ex_z
-        )
-        self.Ey += self._ce_y * (
-            dHx_dz / (self._kz_e * self.dl)
-            + self._psi_Ey_z
-            - dHz_dx / (self._kx_e * self.dl)
-            - self._psi_Ey_x
-        )
-        self.Ez += self._ce_z * (
-            dHy_dx / (self._kx_e * self.dl)
-            + self._psi_Ez_x
-            - dHx_dy / (self._ky_e * self.dl)
-            - self._psi_Ez_y
-        )
+        for (
+            field,
+            f_a,
+            axis_a,
+            f_b,
+            axis_b,
+            kappa_a,
+            kappa_b,
+            psi_a,
+            psi_b,
+            b_a,
+            c_a,
+            b_b,
+            c_b,
+            ce,
+        ) in (
+            (
+                self.Ex,
+                Hz,
+                1,
+                Hy,
+                2,
+                self._ky_e,
+                self._kz_e,
+                self._psi_Ex_y,
+                self._psi_Ex_z,
+                self._by_e,
+                self._cy_e,
+                self._bz_e,
+                self._cz_e,
+                self._ce_x,
+            ),
+            (
+                self.Ey,
+                Hx,
+                2,
+                Hz,
+                0,
+                self._kz_e,
+                self._kx_e,
+                self._psi_Ey_z,
+                self._psi_Ey_x,
+                self._bz_e,
+                self._cz_e,
+                self._bx_e,
+                self._cx_e,
+                self._ce_y,
+            ),
+            (
+                self.Ez,
+                Hy,
+                0,
+                Hx,
+                1,
+                self._kx_e,
+                self._ky_e,
+                self._psi_Ez_x,
+                self._psi_Ez_y,
+                self._bx_e,
+                self._cx_e,
+                self._by_e,
+                self._cy_e,
+                self._ce_z,
+            ),
+        ):
+            self._difference_into(f_a, axis_a, False, d_a)
+            self._difference_into(f_b, axis_b, False, d_b)
+            if self.npml > 0:
+                self._update_psi(psi_a, b_a, c_a, d_a, work_a, work_b)
+                self._update_psi(psi_b, b_b, c_b, d_b, work_a, work_b)
+            self._apply_curl(field, d_a, d_b, kappa_a, kappa_b, psi_a, psi_b, ce, add=True)
 
     def step(self):
         self._step_fields()
