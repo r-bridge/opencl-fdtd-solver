@@ -49,7 +49,8 @@ def validate_material_arrays(eps_array, sigma_array, expected_shape):
             )
         if not np.all(np.isfinite(array)):
             raise ValueError(f"{name} must contain only finite values")
-        return array
+        original = np.asarray(values)
+        return original if original.dtype.kind in "biuf" else array
 
     eps = _real_array(eps_array, "Epsilon")
     if np.any(eps < MIN_EPSILON_R):
