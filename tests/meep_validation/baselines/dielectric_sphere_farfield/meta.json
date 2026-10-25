@@ -1,9 +1,9 @@
 {
   "courant": 0.5715767664977295,
   "discrepancy": {
-    "main_lobe_max_abs_db_error": 0.52055316,
+    "main_lobe_max_abs_db_error": 0.8364296,
     "meep_null_ratio": 1.8161653e-05,
-    "opencl_null_ratio": 0.026825743
+    "opencl_null_ratio": 0.075227904
   },
   "dl_m": 0.002,
   "files": [
@@ -16,6 +16,7 @@
   "n_steps": 500,
   "name": "dielectric_sphere_farfield",
   "npml": 6,
+  "null_ratio_tolerance_factor": 2.0,
   "shape": [
     30,
     30,

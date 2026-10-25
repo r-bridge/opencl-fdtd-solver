@@ -1,9 +1,9 @@
 {
   "courant": 0.5715767664977295,
   "discrepancy": {
-    "main_lobe_max_abs_db_error": 0.38516951,
+    "main_lobe_max_abs_db_error": 0.38516948,
     "meep_null_ratio": 1.8117464e-05,
-    "opencl_null_ratio": 0.029249575
+    "opencl_null_ratio": 0.029249577
   },
   "dl_m": 0.002,
   "files": [
@@ -16,6 +16,7 @@
   "n_steps": 500,
   "name": "vacuum_farfield",
   "npml": 6,
+  "null_ratio_tolerance_factor": null,
   "shape": [
     30,
     30,
