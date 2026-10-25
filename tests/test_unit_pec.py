@@ -87,6 +87,14 @@ class TestEnginePec(unittest.TestCase):
         fdtd.run(10)
         self.assertEqual(fdtd.read_point("Ex", 6, 6, 8), 0.0)
 
+    def test_pec_mask_shape_mismatch_raises(self):
+        """A mask that does not match the grid is rejected before any upload."""
+        shape = (8, 8, 8)
+        fdtd = OpenCLFDTD(shape, 1e-3, npml=2)
+        eps = np.ones(shape, dtype=np.float32)
+        with self.assertRaises(ValueError):
+            fdtd.set_epsilon(eps, pec_mask=np.zeros((8, 8, 7), dtype=bool))
+
 
 if __name__ == "__main__":
     unittest.main()
