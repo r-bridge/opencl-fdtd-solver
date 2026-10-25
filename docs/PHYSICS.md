@@ -115,6 +115,11 @@ S = \frac{0.99}{\sqrt{3}}\approx 0.5716,\qquad
 \Delta t = S\,\frac{\Delta\ell}{c_0} = 0.99\,\frac{\Delta\ell}{c_0\sqrt{3}}.
 \]
 
+Because this fixed timestep is based on vacuum wave speed, accepted cell-wise
+relative permittivity is finite and \(\varepsilon_r\ge 0.99^2=0.9801\);
+conductivity must be finite and nonnegative. The solver rejects values outside
+these bounds rather than silently running beyond the 3-D CFL limit.
+
 Meep comparisons force the **same** Courant (Meep’s own default is 0.5). Changing \(S\) without matching the reference invalidates amplitude/phase comparisons.
 
 ### 4.4 Numerical dispersion (analytic check)

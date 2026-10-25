@@ -23,7 +23,13 @@ import warnings
 import numpy as np
 import pyopencl as cl
 
-from ._validation import sheet_current, source_sheet, validate_grid
+from ._validation import (
+    COURANT_SAFETY_FACTOR,
+    sheet_current,
+    source_sheet,
+    validate_grid,
+    validate_material_arrays,
+)
 from .constants import C0, EPS0, MU0
 from .cpml import build_cpml_profiles
 from .kernels import load_kernel_source
@@ -141,7 +147,7 @@ class OpenCLFDTD(SourceMonitorMixin):
         self.step_num = 0
 
         # Courant-stable time step
-        self.dt = 0.99 * self.dl / (C0 * np.sqrt(3.0))
+        self.dt = COURANT_SAFETY_FACTOR * self.dl / (C0 * np.sqrt(3.0))
 
         # Setup OpenCL context and queue
         if ctx is None:
@@ -228,6 +234,10 @@ class OpenCLFDTD(SourceMonitorMixin):
         the boundary (``materials.yee_edge_eps``). The NumPy engines share
         this interpolation.
 
+        Relative permittivity must be finite and at least 0.9801 so the fixed
+        vacuum-based timestep remains within the 3-D CFL limit. Conductivity
+        must be finite and nonnegative.
+
         ``sigma_array=None`` (default) is the old lossless path: ``ca=1``,
         ``ce = dt/(ε₀ εᵣ)`` exactly as before. Pass ``sigma_array`` (same
         shape as ``eps_array``, S/m) to add ohmic loss — see
@@ -243,10 +253,7 @@ class OpenCLFDTD(SourceMonitorMixin):
         see ``materials.yee_edge_pec``.
         """
         expected = (self.Nx, self.Ny, self.Nz)
-        if eps_array.shape != expected:
-            raise ValueError(
-                f"Epsilon shape mismatch: expected {expected}, got {tuple(eps_array.shape)}"
-            )
+        eps_array, sigma_array = validate_material_arrays(eps_array, sigma_array, expected)
         if pec_mask is not None and pec_mask.shape != expected:
             raise ValueError(
                 f"PEC mask shape mismatch: expected {expected}, got {tuple(pec_mask.shape)}"
@@ -267,10 +274,6 @@ class OpenCLFDTD(SourceMonitorMixin):
             ca_y = ca_x.copy()
             ca_z = ca_x.copy()
         else:
-            if sigma_array.shape != expected:
-                raise ValueError(
-                    f"Sigma shape mismatch: expected {expected}, got {tuple(sigma_array.shape)}"
-                )
             (ca_x, ca_y, ca_z), (cb_x, cb_y, cb_z) = yee_edge_ca_cb(
                 eps_array, sigma_array, self.dt, dtype=self.dtype
             )

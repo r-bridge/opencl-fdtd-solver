@@ -20,7 +20,13 @@ import warnings
 
 import numpy as np
 
-from ._validation import sheet_current, source_sheet, validate_grid
+from ._validation import (
+    COURANT_SAFETY_FACTOR,
+    sheet_current,
+    source_sheet,
+    validate_grid,
+    validate_material_arrays,
+)
 from .constants import C0, EPS0, MU0
 from .cpml import build_cpml_profiles
 from .materials import yee_edge_ce
@@ -44,7 +50,7 @@ class NumPyFDTD(SourceMonitorMixin):
         self.step_num = 0
 
         # Courant-stable time step
-        self.dt = 0.99 * self.dl / (C0 * np.sqrt(3.0))
+        self.dt = COURANT_SAFETY_FACTOR * self.dl / (C0 * np.sqrt(3.0))
 
         # Initialize Yee fields
         self.Ex = np.zeros(shape, dtype=dtype)
@@ -68,13 +74,12 @@ class NumPyFDTD(SourceMonitorMixin):
 
         Edge placement matches ``OpenCLFDTD``: each Yee E-edge averages the
         four cells that own it (``materials.yee_edge_eps``). Conductivity and
-        PEC masks are OpenCL-only.
+        PEC masks are OpenCL-only. Relative permittivity must be finite and at
+        least 0.9801 so the fixed vacuum-based timestep remains within the
+        3-D CFL limit.
         """
         expected = (self.Nx, self.Ny, self.Nz)
-        if eps_array.shape != expected:
-            raise ValueError(
-                f"Epsilon shape mismatch: expected {expected}, got {tuple(eps_array.shape)}"
-            )
+        eps_array, _ = validate_material_arrays(eps_array, None, expected)
         self.eps_r = eps_array.astype(self.dtype)
         self._ce_x, self._ce_y, self._ce_z = yee_edge_ce(self.eps_r, self.dt, dtype=self.dtype)
 

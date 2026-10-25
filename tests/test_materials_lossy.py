@@ -8,9 +8,54 @@ from __future__ import annotations
 import unittest
 
 import numpy as np
-from opencl_fdtd_solver import OpenCLFDTD
+from opencl_fdtd_solver import NumPyFDTD, OpenCLFDTD
+from opencl_fdtd_solver._validation import MIN_EPSILON_R
 from opencl_fdtd_solver.constants import EPS0
 from opencl_fdtd_solver.materials import yee_edge_ca_cb, yee_edge_ce, yee_edge_eps
+
+
+class TestMaterialValidation(unittest.TestCase):
+    def test_epsilon_must_be_finite_positive_and_cfl_safe(self):
+        shape = (4, 4, 4)
+        invalid_values = (
+            (0.0, "Relative permittivity"),
+            (-1.0, "Relative permittivity"),
+            (MIN_EPSILON_R - 1e-6, "Relative permittivity"),
+            (np.nan, "finite values"),
+            (np.inf, "finite values"),
+            (-np.inf, "finite values"),
+        )
+
+        for solver_cls in (NumPyFDTD, OpenCLFDTD):
+            sim = solver_cls(shape, 1e-3, npml=1)
+            for value, message in invalid_values:
+                with self.subTest(solver=solver_cls.__name__, epsilon=value):
+                    with self.assertRaisesRegex(ValueError, message):
+                        sim.set_epsilon(np.full(shape, value))
+
+            with self.subTest(solver=solver_cls.__name__, epsilon="complex"):
+                with self.assertRaisesRegex(ValueError, "real values"):
+                    sim.set_epsilon(np.full(shape, 1.0 + 1.0j))
+
+            sim.set_epsilon(np.full(shape, MIN_EPSILON_R))
+
+    def test_conductivity_must_be_finite_and_nonnegative(self):
+        shape = (4, 4, 4)
+        sim = OpenCLFDTD(shape, 1e-3, npml=1)
+        eps = np.ones(shape)
+
+        for value, message in (
+            (-1.0, "nonnegative"),
+            (np.nan, "finite"),
+            (np.inf, "finite"),
+            (-np.inf, "finite"),
+        ):
+            with self.subTest(conductivity=value):
+                with self.assertRaisesRegex(ValueError, message):
+                    sim.set_epsilon(eps, sigma_array=np.full(shape, value))
+
+        with self.assertRaisesRegex(ValueError, "real values"):
+            sim.set_epsilon(eps, sigma_array=np.full(shape, 1.0 + 1.0j))
 
 
 class TestYeeEdgeMaterialAveraging(unittest.TestCase):

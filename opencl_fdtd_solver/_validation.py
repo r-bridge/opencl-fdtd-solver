@@ -4,6 +4,9 @@ import operator
 
 import numpy as np
 
+COURANT_SAFETY_FACTOR = 0.99
+MIN_EPSILON_R = COURANT_SAFETY_FACTOR**2
+
 
 def _index(value, name):
     try:
@@ -23,6 +26,39 @@ def validate_grid(shape, dl, npml):
     if npml < 0 or 2 * npml > min(shape):
         raise ValueError("npml must be nonnegative and 2*npml must not exceed any grid dimension")
     return shape, dl, npml
+
+
+def validate_material_arrays(eps_array, sigma_array, expected_shape):
+    """Return real material arrays after validating shape, values, and CFL bound."""
+
+    def _real_array(values, name):
+        if np.iscomplexobj(values):
+            raise ValueError(f"{name} must contain real values")
+        try:
+            array = np.asarray(values, dtype=np.float64)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must contain real numeric values") from exc
+        if array.shape != expected_shape:
+            raise ValueError(
+                f"{name} shape mismatch: expected {expected_shape}, got {tuple(array.shape)}"
+            )
+        if not np.all(np.isfinite(array)):
+            raise ValueError(f"{name} must contain only finite values")
+        return array
+
+    eps = _real_array(eps_array, "Epsilon")
+    if np.any(eps < MIN_EPSILON_R):
+        raise ValueError(
+            f"Relative permittivity must be at least {MIN_EPSILON_R:g} "
+            f"for the fixed Courant factor {COURANT_SAFETY_FACTOR:g}"
+        )
+
+    sigma = None
+    if sigma_array is not None:
+        sigma = _real_array(sigma_array, "Sigma")
+        if np.any(sigma < 0):
+            raise ValueError("Conductivity must be nonnegative")
+    return eps, sigma
 
 
 def source_sheet(shape, z, i0, i1, j0, j1):
