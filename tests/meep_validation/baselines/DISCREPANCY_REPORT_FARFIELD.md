@@ -18,7 +18,7 @@ Objective comparison of XZ far-field |S|(θ) and null depth between OpenCLNear2F
 
 | main lobe |Δ|dB | OpenCL null | Meep null |
 |-------------------:|------------:|----------:|
-| 0.385170 | 2.924957e-02 | 1.811746e-05 |
+| 0.385169 | 2.924958e-02 | 1.811746e-05 |
 
 ### Images
 
@@ -34,7 +34,7 @@ Objective comparison of XZ far-field |S|(θ) and null depth between OpenCLNear2F
 
 | main lobe |Δ|dB | OpenCL null | Meep null |
 |-------------------:|------------:|----------:|
-| 0.520553 | 2.682574e-02 | 1.816165e-05 |
+| 0.375021 | 2.807786e-02 | 1.816165e-05 |
 
 ### Images
 

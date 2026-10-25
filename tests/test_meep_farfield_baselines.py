@@ -190,6 +190,9 @@ class TestMeepFarfieldBaselines(unittest.TestCase):
                     case.max_main_lobe_db,
                     f"{case.name}: main-lobe |Δ|dB={err:.3f} exceeds gate {case.max_main_lobe_db}",
                 )
+                # +x is an exact null of this fixture (x-directed currents,
+                # y/z mirror symmetry, sphere centered on the patch); see
+                # FarfieldCase.max_null_ratio.
                 for tag, main, null in (
                     ("opencl", ocl["eh_plus_z"], ocl["eh_plus_x"]),
                     ("meep", meep["eh_plus_z"], meep["eh_plus_x"]),
@@ -197,8 +200,8 @@ class TestMeepFarfieldBaselines(unittest.TestCase):
                     r = float(np.linalg.norm(null[:3]) / (np.linalg.norm(main[:3]) + 1e-30))
                     self.assertLess(
                         r,
-                        0.05,
-                        f"{case.name} {tag} |E(+x)|/|E(+z)|={r:.3e}",
+                        case.max_null_ratio,
+                        f"{case.name} {tag} |E(+x)|/|E(+z)|={r:.3e} exceeds {case.max_null_ratio}",
                     )
 
 

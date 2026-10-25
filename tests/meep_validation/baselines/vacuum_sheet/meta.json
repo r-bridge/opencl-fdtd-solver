@@ -15,56 +15,56 @@
   "discrepancy": {
     "checkpoints": [
       {
-        "aligned_residual_energy_ratio": 0.041445899,
-        "lms_scale": 0.88229545,
+        "aligned_residual_energy_ratio": 0.041445905,
+        "lms_scale": 0.88229546,
         "mid_x_lag_cells": 0,
-        "peak_meep": 7.450646e-06,
+        "peak_meep": 7.4506461e-06,
         "peak_opencl": 9.2042028e-06,
         "peak_ratio": 1.2353563,
         "pearson_corr": 0.96991293,
-        "raw_residual_energy_ratio": 0.058505741,
+        "raw_residual_energy_ratio": 0.058505746,
         "step": 20
       },
       {
-        "aligned_residual_energy_ratio": 0.033169317,
+        "aligned_residual_energy_ratio": 0.033169314,
         "lms_scale": 0.91776803,
         "mid_x_lag_cells": 0,
-        "peak_meep": 2.74487e-05,
-        "peak_opencl": 3.2069907e-05,
-        "peak_ratio": 1.168358,
+        "peak_meep": 2.7448701e-05,
+        "peak_opencl": 3.2069904e-05,
+        "peak_ratio": 1.1683578,
         "pearson_corr": 0.97738417,
-        "raw_residual_energy_ratio": 0.040931178,
+        "raw_residual_energy_ratio": 0.040931176,
         "step": 40
       },
       {
-        "aligned_residual_energy_ratio": 0.0093084854,
-        "lms_scale": 0.94356024,
+        "aligned_residual_energy_ratio": 0.0093084892,
+        "lms_scale": 0.94356023,
         "mid_x_lag_cells": 0,
-        "peak_meep": 0.00011202448,
-        "peak_opencl": 0.00013308841,
-        "peak_ratio": 1.1880297,
-        "pearson_corr": 0.99382478,
-        "raw_residual_energy_ratio": 0.012853104,
+        "peak_meep": 0.00011202449,
+        "peak_opencl": 0.00013308843,
+        "peak_ratio": 1.1880298,
+        "pearson_corr": 0.99382477,
+        "raw_residual_energy_ratio": 0.01285311,
         "step": 60
       },
       {
-        "aligned_residual_energy_ratio": 0.013273606,
-        "lms_scale": 0.95286113,
+        "aligned_residual_energy_ratio": 0.013273605,
+        "lms_scale": 0.95286114,
         "mid_x_lag_cells": 0,
-        "peak_meep": 0.00038452466,
-        "peak_opencl": 0.00045134439,
+        "peak_meep": 0.00038452467,
+        "peak_opencl": 0.00045134441,
         "peak_ratio": 1.1737723,
-        "pearson_corr": 0.99165903,
-        "raw_residual_energy_ratio": 0.015688488,
+        "pearson_corr": 0.99165904,
+        "raw_residual_energy_ratio": 0.015688485,
         "step": 80
       }
     ],
     "summary": {
       "max_abs_mid_x_lag_cells": 0.0,
-      "mean_aligned_residual_energy_ratio": 0.024299327,
+      "mean_aligned_residual_energy_ratio": 0.024299328,
       "mean_lms_scale": 0.92412121,
       "mean_pearson_corr": 0.98319523,
-      "mean_raw_residual_energy_ratio": 0.031994628
+      "mean_raw_residual_energy_ratio": 0.031994629
     }
   },
   "dl_m": 0.0025,

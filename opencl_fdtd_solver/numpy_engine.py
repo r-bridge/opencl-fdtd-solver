@@ -64,6 +64,12 @@ class NumPyFDTD(SourceMonitorMixin):
         self._build_cpml()
 
     def set_epsilon(self, eps_array):
+        """Set cell-centered ``εᵣ`` (shape ``(Nx, Ny, Nz)``).
+
+        Edge placement matches ``OpenCLFDTD``: each Yee E-edge averages the
+        four cells that own it (``materials.yee_edge_eps``). Conductivity and
+        PEC masks are OpenCL-only.
+        """
         expected = (self.Nx, self.Ny, self.Nz)
         if eps_array.shape != expected:
             raise ValueError(

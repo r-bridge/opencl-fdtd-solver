@@ -1,9 +1,9 @@
 {
   "courant": 0.5715767664977295,
   "discrepancy": {
-    "main_lobe_max_abs_db_error": 0.38516951,
+    "main_lobe_max_abs_db_error": 0.38516948,
     "meep_null_ratio": 1.8117464e-05,
-    "opencl_null_ratio": 0.029249575
+    "opencl_null_ratio": 0.029249577
   },
   "dl_m": 0.002,
   "files": [
@@ -12,6 +12,7 @@
   "freq_hz": 5000000000.0,
   "fwidth_hz": 1000000000.0,
   "max_main_lobe_db": 2.5,
+  "max_null_ratio": 0.05,
   "n_angles": 19,
   "n_steps": 500,
   "name": "vacuum_farfield",

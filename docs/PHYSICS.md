@@ -74,7 +74,7 @@ dispersive polarization models.
 - Cell-centered material: \(\varepsilon_r(i,j,k)\).
 - Standard Yee staggering: **E** on edges, **H** on faces. Explicitly:
   - \(E_x\) at \((i+\tfrac12,j,k)\), \(E_y\) at \((i,j+\tfrac12,k)\), \(E_z\) at \((i,j,k+\tfrac12)\).
-- Edge ε used in the E update is the **arithmetic mean** of the two cells sharing that edge (last plane along the stagger axis keeps the cell value).
+- Edge material coefficients used in the E update are the **arithmetic mean of the adjacent cells in the two transverse directions** (four cells for an interior edge). At a domain boundary, only in-domain neighboring cells contribute. This interpolation is applied to both \(\varepsilon_r\) and \(\sigma\).
 
 ### 4.2 Leapfrog update order
 
