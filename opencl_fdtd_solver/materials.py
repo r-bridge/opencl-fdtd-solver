@@ -25,21 +25,38 @@ import numpy as np
 from .constants import EPS0
 
 
+def _yee_edge_average(values: np.ndarray, axes: tuple[int, int]) -> np.ndarray:
+    """Average cell-centered values over cells adjacent to an edge."""
+    total = np.zeros(values.shape, dtype=np.float64)
+    count = np.zeros(values.shape, dtype=np.uint8)
+    for offset_a in (0, -1):
+        for offset_b in (0, -1):
+            dst = [slice(None)] * 3
+            src = [slice(None)] * 3
+            for axis, offset in ((axes[0], offset_a), (axes[1], offset_b)):
+                if offset == -1:
+                    dst[axis] = slice(1, None)
+                    src[axis] = slice(None, -1)
+            total[tuple(dst)] += values[tuple(src)]
+            count[tuple(dst)] += 1
+    np.divide(total, count, out=total)
+    return total
+
+
 def yee_edge_eps(eps_r: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Arithmetic averages of cell-centered ``εᵣ`` onto Yee E-edge locations.
+    """Average cell-centered ``εᵣ`` onto Yee E-edge locations.
 
     ``Ex`` lives at ``(i+½, j, k)``, ``Ey`` at ``(i, j+½, k)``, ``Ez`` at
-    ``(i, j, k+½)``. Each component uses the mean of the two cells that share
-    that edge (the last plane along the stagger axis keeps the cell value).
+    ``(i, j, k+½)``. Each edge averages the cells adjacent to it in the two
+    transverse directions (four cells in the interior); at domain boundaries,
+    only in-domain neighboring cells contribute.
     """
     eps = np.asarray(eps_r, dtype=np.float64)
-    eps_x = eps.copy()
-    eps_x[:-1] = 0.5 * (eps[:-1] + eps[1:])
-    eps_y = eps.copy()
-    eps_y[:, :-1] = 0.5 * (eps[:, :-1] + eps[:, 1:])
-    eps_z = eps.copy()
-    eps_z[:, :, :-1] = 0.5 * (eps[:, :, :-1] + eps[:, :, 1:])
-    return eps_x, eps_y, eps_z
+    return (
+        _yee_edge_average(eps, (1, 2)),
+        _yee_edge_average(eps, (0, 2)),
+        _yee_edge_average(eps, (0, 1)),
+    )
 
 
 def yee_edge_ce(

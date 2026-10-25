@@ -10,7 +10,52 @@ import unittest
 import numpy as np
 from opencl_fdtd_solver import OpenCLFDTD
 from opencl_fdtd_solver.constants import EPS0
-from opencl_fdtd_solver.materials import yee_edge_ca_cb, yee_edge_ce
+from opencl_fdtd_solver.materials import yee_edge_ca_cb, yee_edge_ce, yee_edge_eps
+
+
+class TestYeeEdgeMaterialAveraging(unittest.TestCase):
+    def test_interior_edges_average_transverse_neighbor_cells(self):
+        eps = np.ones((3, 3, 3), dtype=np.float64)
+        eps[1, 1, 1] = 5.0
+
+        eps_x, eps_y, eps_z = yee_edge_eps(eps)
+
+        self.assertEqual(eps_x[1, 1, 1], 2.0)
+        self.assertEqual(eps_y[1, 1, 1], 2.0)
+        self.assertEqual(eps_z[1, 1, 1], 2.0)
+        # A discontinuity along the component axis does not bleed into the
+        # neighboring edge sample; each component averages only transversely.
+        self.assertEqual(eps_x[0, 1, 1], 1.0)
+        self.assertEqual(eps_y[1, 0, 1], 1.0)
+        self.assertEqual(eps_z[1, 1, 0], 1.0)
+
+    def test_boundary_edges_average_only_in_domain_neighbors(self):
+        eps = np.ones((2, 2, 2), dtype=np.float64)
+        eps[0, 0, 0] = 5.0
+
+        eps_x, eps_y, eps_z = yee_edge_eps(eps)
+
+        self.assertEqual(eps_x[0, 0, 0], 5.0)
+        self.assertEqual(eps_y[0, 0, 0], 5.0)
+        self.assertEqual(eps_z[0, 0, 0], 5.0)
+        self.assertEqual(eps_x[0, 1, 1], 2.0)
+        self.assertEqual(eps_y[1, 0, 1], 2.0)
+        self.assertEqual(eps_z[1, 1, 0], 2.0)
+        self.assertEqual(eps_x[1, 1, 1], 1.0)
+        self.assertEqual(eps_y[1, 1, 1], 1.0)
+        self.assertEqual(eps_z[1, 1, 1], 1.0)
+
+    def test_conductivity_uses_the_same_transverse_interpolation(self):
+        eps = np.ones((3, 3, 3), dtype=np.float64)
+        sigma = np.zeros_like(eps)
+        sigma[1, 1, 1] = 8.0
+
+        (_, _, _), (cb_x, cb_y, cb_z) = yee_edge_ca_cb(eps, sigma, dt=1e-13, dtype=np.float64)
+        loss = (8.0 / 4.0) * 1e-13 / (2.0 * EPS0)
+        expected_cb = (1e-13 / EPS0) / (1.0 + loss)
+
+        for cb in (cb_x, cb_y, cb_z):
+            self.assertAlmostEqual(cb[1, 1, 1], expected_cb)
 
 
 class TestYeeEdgeCaCb(unittest.TestCase):

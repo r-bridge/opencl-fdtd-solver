@@ -159,10 +159,10 @@ class TestOpenCLEngineBasics(unittest.TestCase):
         fdtd.queue.finish()
         ce_x = host.reshape(12, 12, 12)
         expect_x, _, _ = yee_edge_ce(eps, fdtd.dt, dtype=np.float32)
-        # Ex-edge at (6,6,6) averages cells 6 and 7 → ε=2.5.
+        # Ex-edge at (6,6,6) averages four neighboring cells in y/z → ε=1.75.
         self.assertAlmostEqual(float(ce_x[6, 6, 6]), float(expect_x[6, 6, 6]), places=6)
         self.assertAlmostEqual(float(ce_x[0, 0, 0]), float(fdtd.dt / EPS0), places=6)
-        self.assertAlmostEqual(float(expect_x[6, 6, 6]), float(fdtd.dt / (EPS0 * 2.5)), places=6)
+        self.assertAlmostEqual(float(expect_x[6, 6, 6]), float(fdtd.dt / (EPS0 * 1.75)), places=6)
 
     def test_set_epsilon_shape_mismatch(self):
         fdtd = OpenCLFDTD((10, 10, 10), 1e-3, npml=2)
@@ -200,7 +200,7 @@ class TestOpenCLEngineBasics(unittest.TestCase):
         fdtd.step()
         fdtd.queue.finish()
         ex = fdtd.Ex
-        soft_edge = -float(fdtd.dt) / (float(EPS0) * 2.5) * Jx
+        soft_edge = -float(fdtd.dt) / (float(EPS0) * 1.75) * Jx
         soft_vac = -float(fdtd.dt) / float(EPS0) * Jx
         self.assertAlmostEqual(float(ex[8, 8, z]), soft_edge, places=6)
         self.assertAlmostEqual(float(ex[p, p, z]), soft_vac, places=6)
@@ -394,7 +394,7 @@ class TestNumPyEngine(unittest.TestCase):
         )
         fdtd.step()
         ex = fdtd.Ex
-        soft_edge = -float(fdtd.dt) / (float(EPS0) * 2.5) * Jx
+        soft_edge = -float(fdtd.dt) / (float(EPS0) * 1.75) * Jx
         soft_vac = -float(fdtd.dt) / float(EPS0) * Jx
         self.assertAlmostEqual(float(ex[8, 8, z]), soft_edge, places=6)
         self.assertAlmostEqual(float(ex[p, p, z]), soft_vac, places=6)
