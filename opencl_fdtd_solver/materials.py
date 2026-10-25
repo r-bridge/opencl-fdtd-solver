@@ -24,11 +24,19 @@ import numpy as np
 
 from .constants import EPS0
 
+# Transverse axes of each E component: Ex at (i+½, j, k) is owned by the cells
+# (i, j-1..j, k-1..k); Ey at (i, j+½, k) by (i-1..i, j, k-1..k); Ez at
+# (i, j, k+½) by (i-1..i, j-1..j, k). Everything that maps a cell-centered
+# quantity onto Yee E-edges (ε/σ averaging, PEC masks) walks these same four
+# owner cells, so the geometry lives in one place.
+_EDGE_TRANSVERSE_AXES: tuple[tuple[int, int], ...] = ((1, 2), (0, 2), (0, 1))
 
-def _yee_edge_average(values: np.ndarray, axes: tuple[int, int]) -> np.ndarray:
-    """Average cell-centered values over cells adjacent to an edge."""
-    total = np.zeros(values.shape, dtype=np.float64)
-    count = np.zeros(values.shape, dtype=np.uint8)
+
+def _edge_owner_slices(axes: tuple[int, int]):
+    """Yield ``(dst, src)`` index tuples such that ``out[dst] op= cells[src]``
+    accumulates, for every edge, each of its (up to four) owner cells: the
+    cell with the same index and its predecessors along the two transverse
+    ``axes``. Index 0 has no predecessor, so boundary edges see fewer cells."""
     for offset_a in (0, -1):
         for offset_b in (0, -1):
             dst = [slice(None)] * 3
@@ -37,8 +45,16 @@ def _yee_edge_average(values: np.ndarray, axes: tuple[int, int]) -> np.ndarray:
                 if offset == -1:
                     dst[axis] = slice(1, None)
                     src[axis] = slice(None, -1)
-            total[tuple(dst)] += values[tuple(src)]
-            count[tuple(dst)] += 1
+            yield tuple(dst), tuple(src)
+
+
+def _yee_edge_average(values: np.ndarray, axes: tuple[int, int]) -> np.ndarray:
+    """Average cell-centered values over the owner cells of each edge."""
+    total = np.zeros(values.shape, dtype=np.float64)
+    count = np.zeros(values.shape, dtype=np.uint8)
+    for dst, src in _edge_owner_slices(axes):
+        total[dst] += values[src]
+        count[dst] += 1
     np.divide(total, count, out=total)
     return total
 
@@ -52,11 +68,8 @@ def yee_edge_eps(eps_r: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]
     only in-domain neighboring cells contribute.
     """
     eps = np.asarray(eps_r, dtype=np.float64)
-    return (
-        _yee_edge_average(eps, (1, 2)),
-        _yee_edge_average(eps, (0, 2)),
-        _yee_edge_average(eps, (0, 1)),
-    )
+    ex, ey, ez = (_yee_edge_average(eps, axes) for axes in _EDGE_TRANSVERSE_AXES)
+    return ex, ey, ez
 
 
 def yee_edge_ce(
@@ -80,7 +93,7 @@ def yee_edge_pec(mask: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     lies at ``(i+½, j, k)``: it runs along x across cell ``i`` and sits on the
     node line ``(j, k)``, so it is one of the four x-directed boundary edges of
     the cells ``(i, j-1..j, k-1..k)``. The Ex mask is therefore the OR of the
-    cell mask over its two *transverse* neighbours (``j-1`` and ``k-1``),
+    cell mask over the same four owner cells ``yee_edge_eps`` averages, i.e. its two *transverse* neighbours (``j-1`` and ``k-1``),
     clipped at the domain boundary; likewise Ey over ``i-1``/``k-1`` and Ez
     over ``i-1``/``j-1``. Every one of the 12 edges of a masked cell ends up
     masked, so finite and staircased conductors present a closed surface with
@@ -99,19 +112,13 @@ def yee_edge_pec(mask: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     if m.ndim != 3:
         raise ValueError(f"PEC mask must be 3-dimensional, got {m.ndim}D")
 
-    def _or_prev(a: np.ndarray, axis: int) -> np.ndarray:
-        """OR each cell with its predecessor along ``axis`` (index 0 keeps itself)."""
-        out = a.copy()
-        dst = [slice(None)] * 3
-        src = [slice(None)] * 3
-        dst[axis] = slice(1, None)
-        src[axis] = slice(None, -1)
-        out[tuple(dst)] |= a[tuple(src)]
+    def _edge_mask(axes: tuple[int, int]) -> np.ndarray:
+        out = np.zeros(m.shape, dtype=bool)
+        for dst, src in _edge_owner_slices(axes):
+            out[dst] |= m[src]
         return out
 
-    mx = _or_prev(_or_prev(m, 1), 2)
-    my = _or_prev(_or_prev(m, 0), 2)
-    mz = _or_prev(_or_prev(m, 0), 1)
+    mx, my, mz = (_edge_mask(axes) for axes in _EDGE_TRANSVERSE_AXES)
     return mx, my, mz
 
 
