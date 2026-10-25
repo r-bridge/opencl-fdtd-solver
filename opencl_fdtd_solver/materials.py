@@ -56,6 +56,29 @@ def yee_edge_ce(
     )
 
 
+def yee_edge_pec(mask: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Cell-centered PEC mask → per-component Yee E-edge masks.
+
+    An E edge belongs to the conductor when EITHER adjacent cell is PEC
+    (logical OR where ``yee_edge_eps`` averages): a mixed edge left active
+    would let tangential E leak through the staircased surface. Used by
+    ``EngineFDTD.set_epsilon(pec_mask=)`` to pin those edges to E = 0
+    (``ca = ce = 0``), the correct σ→∞ limit — feeding a huge σ into
+    ``yee_edge_ca_cb`` instead drives ``Ca → −1`` (sign-flipping, stable but
+    wrong), and a huge lossless εᵣ demands resolving the internal
+    wavelength. PEC needs neither: foil-like reflectors get exact tangential
+    E = 0 at any grid resolution.
+    """
+    m = np.asarray(mask, dtype=bool)
+    mx = m.copy()
+    mx[:-1] |= m[1:]
+    my = m.copy()
+    my[:, :-1] |= m[:, 1:]
+    mz = m.copy()
+    mz[:, :, :-1] |= m[:, :, 1:]
+    return mx, my, mz
+
+
 def yee_edge_ca_cb(
     eps_r: np.ndarray, sigma: np.ndarray, dt: float, dtype=np.float32
 ) -> tuple[tuple[np.ndarray, np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray, np.ndarray]]:

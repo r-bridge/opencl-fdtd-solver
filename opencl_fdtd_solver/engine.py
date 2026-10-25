@@ -27,7 +27,7 @@ from ._validation import sheet_current, source_sheet, validate_grid
 from .constants import C0, EPS0, MU0
 from .cpml import build_cpml_profiles
 from .kernels import load_kernel_source
-from .materials import yee_edge_ca_cb, yee_edge_ce
+from .materials import yee_edge_ca_cb, yee_edge_ce, yee_edge_pec
 from .plugin import SourceMonitorMixin
 
 # Reuse one context/queue for default OpenCLFDTD construction. Creating a new
@@ -215,7 +215,7 @@ class OpenCLFDTD(SourceMonitorMixin):
         self._build_cpml()
         self._compile_kernels()
 
-    def set_epsilon(self, eps_array, sigma_array=None):
+    def set_epsilon(self, eps_array, sigma_array=None, pec_mask=None):
         """
         Set cell-centered ``εᵣ`` (and optionally conductivity ``σ`` [S/m]);
         store Yee-edge lossy-update coefficients ``ca``, ``ce=cb`` on the GPU.
@@ -223,35 +223,43 @@ class OpenCLFDTD(SourceMonitorMixin):
         ``sigma_array=None`` (default) is the old lossless path: ``ca=1``,
         ``ce = dt/(ε₀ εᵣ)`` exactly as before. Pass ``sigma_array`` (same
         shape as ``eps_array``, S/m) to add ohmic loss — see
-        ``materials.yee_edge_ca_cb`` for the update equation. This is how a
-        real (non-PEC) reflector should be modeled: a lossy conductor with a
-        resolvable skin depth, rather than a very high lossless εᵣ, whose
-        reflectivity requires resolving a correspondingly short *internal
-        wavelength* (a much stiffer grid requirement than skin depth for the
-        same reflectivity).
+        ``materials.yee_edge_ca_cb`` for the update equation. A *finite*
+        lossy conductor needs its skin depth resolved by the grid; below
+        that, use ``pec_mask`` instead.
+
+        ``pec_mask`` (cell-centered bool, same shape) marks perfect-conductor
+        cells: every Yee E-edge touching a masked cell gets ``ca = ce = 0``,
+        pinning tangential E to zero exactly (fields start at zero). This is
+        the right model for foil/metal reflectors whose skin depth is far
+        below the grid step — see ``materials.yee_edge_pec``.
         """
         expected = (self.Nx, self.Ny, self.Nz)
         if eps_array.shape != expected:
             raise ValueError(
                 f"Epsilon shape mismatch: expected {expected}, got {tuple(eps_array.shape)}"
             )
+        if pec_mask is not None and pec_mask.shape != expected:
+            raise ValueError(
+                f"PEC mask shape mismatch: expected {expected}, got {tuple(pec_mask.shape)}"
+            )
         if sigma_array is None:
             ce_x, ce_y, ce_z = yee_edge_ce(eps_array, self.dt, dtype=self.dtype)
-            cl.enqueue_copy(self.queue, self.ce_x_buf, ce_x.ravel())
-            cl.enqueue_copy(self.queue, self.ce_y_buf, ce_y.ravel())
-            cl.enqueue_copy(self.queue, self.ce_z_buf, ce_z.ravel())
-            ca_lossless = np.ones(self.size, dtype=self.dtype)
-            cl.enqueue_copy(self.queue, self.ca_x_buf, ca_lossless)
-            cl.enqueue_copy(self.queue, self.ca_y_buf, ca_lossless)
-            cl.enqueue_copy(self.queue, self.ca_z_buf, ca_lossless)
-            return
-        if sigma_array.shape != expected:
-            raise ValueError(
-                f"Sigma shape mismatch: expected {expected}, got {tuple(sigma_array.shape)}"
+            ca_x = np.ones((self.Nx, self.Ny, self.Nz), dtype=self.dtype)
+            ca_y = ca_x.copy()
+            ca_z = ca_x.copy()
+            cb_x, cb_y, cb_z = ce_x, ce_y, ce_z
+        else:
+            if sigma_array.shape != expected:
+                raise ValueError(
+                    f"Sigma shape mismatch: expected {expected}, got {tuple(sigma_array.shape)}"
+                )
+            (ca_x, ca_y, ca_z), (cb_x, cb_y, cb_z) = yee_edge_ca_cb(
+                eps_array, sigma_array, self.dt, dtype=self.dtype
             )
-        (ca_x, ca_y, ca_z), (cb_x, cb_y, cb_z) = yee_edge_ca_cb(
-            eps_array, sigma_array, self.dt, dtype=self.dtype
-        )
+        if pec_mask is not None:
+            px, py, pz = yee_edge_pec(pec_mask)
+            for arr, m in ((ca_x, px), (ca_y, py), (ca_z, pz), (cb_x, px), (cb_y, py), (cb_z, pz)):
+                arr[m] = 0
         cl.enqueue_copy(self.queue, self.ce_x_buf, cb_x.ravel())
         cl.enqueue_copy(self.queue, self.ce_y_buf, cb_y.ravel())
         cl.enqueue_copy(self.queue, self.ce_z_buf, cb_z.ravel())

@@ -83,7 +83,7 @@ PyOpenCL's `create_some_context`, not by the solver's default discovery.
 
 | Method | Notes |
 |---|---|
-| `set_epsilon(eps_array, sigma_array=None)` | Cell-wise scalar εᵣ and optional ohmic σ (S/m), both shape `(Nx,Ny,Nz)`; builds Yee-edge `Ca`, `Cb` coefficients |
+| `set_epsilon(eps_array, sigma_array=None, pec_mask=None)` | Cell-wise scalar εᵣ and optional ohmic σ (S/m), both shape `(Nx,Ny,Nz)`; builds Yee-edge `Ca`, `Cb` coefficients. Optional `pec_mask` (bool, same shape) marks perfect-conductor cells: every Yee E-edge touching a masked cell gets `Ca = Cb = 0`, pinning tangential E to zero exactly. Use it for metal surfaces whose skin depth is far below the grid step; a finite σ there would need the skin depth resolved |
 | `add_source_Jx(z_src, Jx, i0=None, i1=None, j0=None, j1=None, *, rim_taper=False, rim_edge=0.8, rim_renorm=True)` | SI Jx (A/m²) on a constant-z Ex sheet: `Ex += -Cb*Jx`; lossless `Cb=dt/(ε₀ εᵣ)` |
 | `add_source_Ex(…)` | **Deprecated** soft Ex add; prefer `add_source_Jx` |
 | `step()` | One Yee step (H → sources → E → monitors) |
