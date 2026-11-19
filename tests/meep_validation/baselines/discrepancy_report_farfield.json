@@ -10,7 +10,7 @@
       ],
       "max_main_lobe_db": 2.5,
       "metrics": {
-        "main_lobe_max_abs_db_error": 0.11598493,
+        "main_lobe_max_abs_db_error": 0.069594927,
         "meep_null_ratio": 1.8117464e-05,
         "opencl_null_ratio": 7.5167135e-07
       },
@@ -36,7 +36,7 @@
       ],
       "max_main_lobe_db": 3.0,
       "metrics": {
-        "main_lobe_max_abs_db_error": 0.13220474,
+        "main_lobe_max_abs_db_error": 0.086452713,
         "meep_null_ratio": 1.8161653e-05,
         "opencl_null_ratio": 2.6739002e-06
       },

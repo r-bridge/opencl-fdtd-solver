@@ -15,7 +15,7 @@ It is intentionally a **kernel**, not a full CAD/EM suite:
 | Included | Not included |
 |---|---|
 | Uniform cubic Yee grid | Non-uniform / unstructured meshes |
-| Nondispersive scalar εᵣ, optional ohmic σ on OpenCL | Lorentz / Debye / Drude media |
+| Nondispersive isotropic or diagonal-anisotropic εᵣ, optional ohmic σ and cell-centered PEC | Lorentz / Debye / Drude media |
 | Vacuum μ = μ₀ | Magnetic materials (μᵣ ≠ 1) |
 | Soft Ex / SI Jx sheet sources | Built-in antennas, PEC/PMC, periodic BCs |
 | Closed-box Huygens near-to-far | Full geometric optics / high-frequency asymptotics |
@@ -60,8 +60,8 @@ In vacuum or nondispersive dielectric with **μ = μ₀** and no free charges:
 \nabla\times\mathbf{H} = \varepsilon_0\varepsilon_r\,\partial_t\mathbf{E} + \sigma\mathbf{E} + \mathbf{J}.
 \]
 
-The OpenCL engine supports scalar, frequency-independent **ohmic conductivity**
-σ. The NumPy reference is lossless (σ=0). Neither supports magnetic contrast or
+Both the OpenCL and NumPy engines support scalar, frequency-independent **ohmic conductivity**
+σ and cell-centered PEC masks. Neither supports magnetic contrast or
 dispersive polarization models.
 
 ---
@@ -175,7 +175,7 @@ Separate 1-D profiles are built for E-node and H-node locations (half-cell stagg
 
 **What to expect**
 
-- Normal-incidence reflection is gated analytically below about **−25 dB** in the unit suite.
+- Normal-incidence reflection is gated analytically below **−50 dB** on both `−z` and `+z` faces (with `< 3 dB` low/high symmetry, scale invariance across 6 orders of magnitude in `dl`, monotonic convergence with `npml`, steered 45° oblique single-face absorption `< −45 dB` front / `< −38 dB` back-wall path-matched at `npml = 10`, and 3-D enclosure reflection `< −35 dB` at `npml = 8`) in the unit suite.
 - Thin PML (e.g. 4 cells on tiny validation grids) is a compromise for CI cost, not a claim of ultra-low reflection for all angles/spectra.
 - Energy after the source turns off should decay; Meep-matched PML decay tests require late/peak Ex energy \(\lt 0.05\).
 
@@ -275,7 +275,8 @@ Implemented in `tests/test_analytic_validation.py`:
 
 - Yee dispersion relation (plane-wave phase).
 - Far-field angular shape for a compact \(E_x\) source \(\sim\cos^2\theta\) in the XZ cut, plus a strict endfire null-depth gate.
-- CPML normal-incidence reflection bound (\(\lesssim -25\,\mathrm{dB}\)).
+- Exact SI Hertzian dipole far-field complex vector \(\mathbf{E},\mathbf{H}\) (absolute amplitude, phase, and endfire null with zero fitted scaling), Huygens box-size/translation invariance, near-to-far Poynting power conservation, and OpenCL ↔ NumPy monitor parity.
+- CPML reflection bounds (`< -50 dB` normal on `-z`/`+z` with low/high symmetry, physical scale invariance across `dl`, thickness convergence at fixed vacuum gaps, steered 45° oblique single-face path-matched absorption `< -45 dB` front / `< -38 dB` back-wall, and 3-D enclosure reflection/symmetry).
 - Closed-box (npml=0) electromagnetic energy stability after the source is off.
 - Dielectric-sphere bistatic E-plane shape vs Bohren–Huffman Mie series (`tests/analytic_mie.py`; normalized pattern correlation, not absolute RCS).
 
