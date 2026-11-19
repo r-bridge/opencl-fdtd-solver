@@ -47,10 +47,14 @@ def validate_material_arrays(eps_array, sigma_array, expected_shape):
     """
 
     def _real_array(values, name):
-        if np.iscomplexobj(values):
+        try:
+            original = np.asarray(values)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must contain real numeric values") from exc
+        if np.iscomplexobj(original):
             raise ValueError(f"{name} must contain real values")
         try:
-            array = np.asarray(values, dtype=np.float64)
+            array = np.asarray(original, dtype=np.float64)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"{name} must contain real numeric values") from exc
         if array.shape != expected_shape:
@@ -59,7 +63,6 @@ def validate_material_arrays(eps_array, sigma_array, expected_shape):
             )
         if not np.all(np.isfinite(array)):
             raise ValueError(f"{name} must contain only finite values")
-        original = np.asarray(values)
         return original if original.dtype.kind in "biuf" else array
 
     def _check_eps_one(values, name):
@@ -73,7 +76,18 @@ def validate_material_arrays(eps_array, sigma_array, expected_shape):
             )
         return arr
 
-    if isinstance(eps_array, tuple):
+    def _plane_matches(plane):
+        try:
+            return np.shape(plane) == expected_shape[1:]
+        except ValueError:
+            return False
+
+    isotropic_tuple = (
+        isinstance(eps_array, tuple)
+        and len(eps_array) == expected_shape[0]
+        and all(_plane_matches(plane) for plane in eps_array)
+    )
+    if isinstance(eps_array, tuple) and not isotropic_tuple:
         if len(eps_array) != 3:
             raise ValueError(
                 f"Anisotropic epsilon tuple must have 3 components (eps_x, eps_y, eps_z); got {len(eps_array)}"

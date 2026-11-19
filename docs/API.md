@@ -65,8 +65,8 @@ OpenCLFDTD(shape, dl, npml=20, dtype=np.float32, ctx=None, queue=None, accum_fp6
 | `dl` | Finite, positive uniform cell size (m) |
 | `npml` | Nonnegative integer CFS-CPML thickness; `2*npml <= min(shape)`; `0` disables PML |
 | `dtype` | `np.float32` (default) or `np.float64` |
-| `ctx`, `queue` | Optional existing PyOpenCL context/queue |
-| `accum_fp64` | Monitor DFT / near-to-far accumulation in FP64 regardless of `dtype`. Defaults to `None`, which auto-enables FP64 accumulation when the device supports FP64 + `cl_khr_int64_base_atomics` and falls back to `False` otherwise |
+| `ctx`, `queue` | Optional existing PyOpenCL context and queue. A supplied queue provides the context if omitted and selects the device used for kernel builds. If both are supplied, the queue must belong to `ctx` |
+| `accum_fp64` | With FP32 fields, `None` automatically enables FP64 monitor DFT and near-to-far accumulation on queue devices with FP64 and `cl_khr_int64_base_atomics`. Use `True` to require FP64 or `False` to keep FP32 accumulation. FP64 fields always use FP64 accumulation |
 
 **FP64** rebuilds the same kernels with `real=double`. Requires device `cl_khr_fp64` (or `cl_amd_fp64`) and `cl_khr_int64_base_atomics` (near-to-far). Expect ~2× wall time on bandwidth-bound grids. Missing extensions → `ValueError`. Oversized models → `MemoryError` before allocation.
 
@@ -86,7 +86,7 @@ PyOpenCL's `create_some_context`, not by the solver's default discovery.
 
 | Method | Notes |
 |---|---|
-| `set_epsilon(eps_array, sigma_array=None, pec_mask=None)` | Cell-wise isotropic εᵣ or diagonal anisotropic 3-tuple `(eps_x, eps_y, eps_z)` and optional ohmic σ (S/m), each shape `(Nx,Ny,Nz)`; εᵣ must be finite and ≥ 1 (nondispersive dielectric; the fixed 0.99 vacuum-based Courant factor would in any case be violated below 0.9801), and σ must be finite and nonnegative. Builds Yee-edge `Ca`, `Cb` coefficients. Each E-edge takes the arithmetic mean of εᵣ (and σ) over the four cells that own it, the cell with the same index and its predecessors along the two transverse axes (`Ex[i,j,k]` at `(i+½, j, k)` averages cells `(i, j−1..j, k−1..k)`); at the domain boundary only in-domain cells contribute. Optional `pec_mask` (bool, same shape) marks perfect-conductor cells: all 12 Yee E-edges on each masked cell's boundary get `Ca = Cb = 0`, pinning tangential E to zero exactly on the closed cell surface. Use it for metal surfaces whose skin depth is far below the grid step; a finite σ there would need the skin depth resolved |
+| `set_epsilon(eps_array, sigma_array=None, pec_mask=None)` | Cell-wise isotropic εᵣ (grid-shaped array-like, including tuples of 2-D slices) or diagonal anisotropic 3-tuple `(eps_x, eps_y, eps_z)` and optional ohmic σ (S/m), each shape `(Nx,Ny,Nz)`; εᵣ must be finite and ≥ 1 (nondispersive dielectric; the fixed 0.99 vacuum-based Courant factor would in any case be violated below 0.9801), and σ must be finite and nonnegative. Builds Yee-edge `Ca`, `Cb` coefficients. Each E-edge takes the arithmetic mean of εᵣ (and σ) over the four cells that own it, the cell with the same index and its predecessors along the two transverse axes (`Ex[i,j,k]` at `(i+½, j, k)` averages cells `(i, j−1..j, k−1..k)`); at the domain boundary only in-domain cells contribute. Optional `pec_mask` (bool, same shape) marks perfect-conductor cells: all 12 Yee E-edges on each masked cell's boundary get `Ca = Cb = 0`, pinning tangential E to zero exactly on the closed cell surface. Use it for metal surfaces whose skin depth is far below the grid step; a finite σ there would need the skin depth resolved |
 | `add_source_Jx(z_src, Jx, i0=None, i1=None, j0=None, j1=None, *, rim_taper=False, rim_edge=0.8, rim_renorm=True)` | SI Jx (A/m²) on a constant-z Ex sheet: `Ex += -Cb*Jx`; lossless `Cb=dt/(ε₀ εᵣ)` |
 | `add_source_Ex(…)` | **Deprecated** soft Ex add; prefer `add_source_Jx` |
 | `step()` | One Yee step (H → sources → E → monitors) |
@@ -128,7 +128,7 @@ NumPyFDTD(shape, dl, npml=20, dtype=np.float32, psi_dtype=None)
 ```
 
 Same Yee/CPML physics (including ohmic conductivity, PEC masks, and diagonal anisotropic εᵣ) and source/monitor control flow as OpenCL.
-`set_epsilon(eps_array, sigma_array=None, pec_mask=None)` places εᵣ, σ, and PEC masks on Yee edges with the same four-owner-cell rules as OpenCL (shared `materials.yee_edge_*`). εᵣ values must be finite and ≥ 1; σ must be finite and nonnegative. Grid, material, and sheet validation match OpenCL. CPML ψ arrays are
+`set_epsilon(eps_array, sigma_array=None, pec_mask=None)` places εᵣ, σ, and PEC masks on Yee edges with the same four-owner-cell rules as OpenCL (shared `materials.yee_edge_*`). εᵣ values must be finite and ≥ 1; σ must be finite and nonnegative. Grid, material (including isotropic tuples of 2-D slices), and sheet validation match OpenCL. CPML ψ arrays are
 **full volume** (`Nx×Ny×Nz` × 12). Optional `psi_dtype` (e.g. `float16`)
 reduces ψ memory at the cost of precision; that dtype is retained across steps.
 
@@ -158,9 +158,9 @@ Construction **registers** the monitor on `fdtd` automatically.
 
 | Method | Notes |
 |---|---|
-| `get_farfield(obs)` | Complex `(Ex,Ey,Ez,Hx,Hy,Hz)` at one point (m) |
-| `get_farfields(points)` | Shape `(n,6)` for many points (`OpenCLNear2FarMonitor`) |
-| `farfield_polar_xz(*, distance_m=1000, n_angles=73)` | OpenCL XZ cut: angles (deg), `10*log10(\|S\|)`; not peak-normalized, zero → −∞ |
+| `get_farfield(obs)` | Complex `(Ex,Ey,Ez,Hx,Hy,Hz)` for far-field observation vector `obs` in metres (direction `obs/\|obs\|`, range `\|obs\|`, phase referenced to the grid origin) |
+| `get_farfields(points)` | Shape `(n,6)` for far-field observation vectors in metres (`OpenCLNear2FarMonitor`; same convention as `get_farfield`) |
+| `farfield_polar_xz(*, distance_m=1000, n_angles=73)` | OpenCL XZ cut at fixed range `distance_m` along `(sin θ, 0, cos θ)` (equivalent to a sphere of radius `distance_m` centered on the box, since translation cancels in `\|S\|`). Returns angles in degrees from +z toward +x and absolute `10*log10(\|S\|)`, with zero mapped to −∞ |
 | `snapshot_dft()` / `dft_relative_change()` | Device-side convergence helper (OpenCL) |
 | `fetch_dft_fields()` | Download face DFT into sparse host volumes (debug) |
 

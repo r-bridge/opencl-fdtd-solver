@@ -58,12 +58,6 @@ class Near2FarBase:
                 f"x=[{self.ix0}, {self.ix1}], y=[{self.iy0}, {self.iy1}], z=[{self.iz0}, {self.iz1}]"
             )
 
-        self._box_center_m = (
-            0.5 * (self.ix0 + self.ix1) * self.dl,
-            0.5 * (self.iy0 + self.iy1) * self.dl,
-            0.5 * (self.iz0 + self.iz1) * self.dl,
-        )
-
         self._faces = [
             ("x", self.ix0, -1),
             ("x", self.ix1, +1),
@@ -758,11 +752,11 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         n = max(3, int(n_angles))
         angles = np.linspace(-180.0, 180.0, n, dtype=np.float64)
         rad = np.deg2rad(angles)
-        cx, cy, cz = self._box_center_m
-        pts = np.column_stack([cx + R * np.sin(rad), np.full(n, cy), cz + R * np.cos(rad)]).astype(
-            self._acc_dtype
-        )
-        eh = self.get_farfields(pts)
+        # The solver derives direction and range from these displacements.
+        # Translating the surface coordinates would only add a common phase
+        # to E and H, which cancels in the Poynting magnitude.
+        displacements = np.column_stack([R * np.sin(rad), np.zeros(n), R * np.cos(rad)])
+        eh = self.get_farfields(displacements)
         db = np.empty(n, dtype=np.float64)
         for i in range(n):
             db[i], _ = _poynting_db(eh[i])

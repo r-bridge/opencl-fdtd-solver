@@ -133,7 +133,7 @@ class TestAccumFp64AndFetchEdges(unittest.TestCase):
         dev.extensions = "cl_khr_global_int32_base_atomics"
         ctx = mock.Mock()
         ctx.devices = [dev]
-        queue = mock.Mock()
+        queue = mock.Mock(context=ctx, device=dev)
 
         with (
             mock.patch.object(OpenCLFDTD, "_check_device_memory"),
@@ -145,6 +145,57 @@ class TestAccumFp64AndFetchEdges(unittest.TestCase):
             sim = OpenCLFDTD((8, 8, 8), 1e-3, npml=1, ctx=ctx, queue=queue)
             self.assertFalse(sim.accum_fp64)
             self.assertEqual(sim.accreal, np.float32)
+
+    def test_mixed_context_uses_queue_device_for_precision_and_build(self):
+        fp32 = mock.Mock(extensions="", max_work_group_size=128)
+        fp64 = mock.Mock(
+            extensions="cl_khr_fp64 cl_khr_int64_base_atomics", max_work_group_size=128
+        )
+        ctx = mock.Mock(devices=[fp64, fp32])
+
+        for dev, accum_fp64 in ((fp32, False), (fp64, True)):
+            with (
+                self.subTest(accum_fp64=accum_fp64),
+                mock.patch.object(OpenCLFDTD, "_check_device_memory"),
+                mock.patch.object(OpenCLFDTD, "_build_cpml"),
+                mock.patch("opencl_fdtd_solver.engine.cl.Program") as program,
+                mock.patch("opencl_fdtd_solver.engine.cl.Kernel") as kernel,
+                mock.patch("opencl_fdtd_solver.engine.cl.Buffer"),
+                mock.patch("opencl_fdtd_solver.engine.cl.enqueue_copy"),
+            ):
+                kernel.return_value.get_work_group_info.return_value = 128
+                queue = mock.Mock(context=ctx, device=dev)
+                sim = OpenCLFDTD((8, 8, 8), 1e-3, npml=1, queue=queue)
+                self.assertIs(sim.ctx, ctx)
+                self.assertIs(sim.device, dev)
+                self.assertEqual(sim.accum_fp64, accum_fp64)
+                build_args = program.return_value.build.call_args.kwargs
+                self.assertEqual(build_args["devices"], [dev])
+                self.assertIn(f"-DACCUM_FP64={int(accum_fp64)}", build_args["options"])
+
+        other_ctx = mock.Mock(devices=[fp32])
+        mismatched_queue = mock.Mock(context=other_ctx, device=fp32)
+        with self.assertRaisesRegex(ValueError, "supplied context"):
+            OpenCLFDTD((8, 8, 8), 1e-3, npml=1, ctx=ctx, queue=mismatched_queue)
+
+        with (
+            mock.patch.object(OpenCLFDTD, "_check_device_memory"),
+            mock.patch.object(OpenCLFDTD, "_build_cpml"),
+            mock.patch("opencl_fdtd_solver.engine.cl.CommandQueue") as queue_cls,
+            mock.patch("opencl_fdtd_solver.engine.cl.Program") as program,
+            mock.patch("opencl_fdtd_solver.engine.cl.Kernel") as kernel,
+            mock.patch("opencl_fdtd_solver.engine.cl.Buffer"),
+            mock.patch("opencl_fdtd_solver.engine.cl.enqueue_copy"),
+        ):
+            queue_cls.return_value = mock.Mock(context=ctx, device=fp32)
+            kernel.return_value.get_work_group_info.return_value = 128
+            sim = OpenCLFDTD((8, 8, 8), 1e-3, npml=1, ctx=ctx)
+            queue_cls.assert_called_once_with(ctx)
+            self.assertIs(sim.ctx, ctx)
+            self.assertIs(sim.queue, queue_cls.return_value)
+            self.assertIs(sim.device, fp32)
+            self.assertFalse(sim.accum_fp64)
+            self.assertEqual(program.return_value.build.call_args.kwargs["devices"], [fp32])
 
     def test_fetch_dft_fields_does_not_clobber_shared_edges_with_normal_zeros(self):
         sim = OpenCLFDTD((20, 20, 20), 1e-3, npml=3, dtype=np.float32)
@@ -163,27 +214,39 @@ class TestAccumFp64AndFetchEdges(unittest.TestCase):
 
     def test_farfield_polar_xz_centered_on_box(self):
         sim = OpenCLFDTD((24, 24, 24), 2e-3, npml=4, dtype=np.float32)
-        mon = OpenCLNear2FarMonitor(sim, (0.028, 0.024, 0.028), (0.012, 0.012, 0.012), 5e9)
-        cx, cy, cz = mon._box_center_m
-        self.assertAlmostEqual(cx, 0.5 * (mon.ix0 + mon.ix1) * sim.dl)
-        self.assertAlmostEqual(cy, 0.5 * (mon.iy0 + mon.iy1) * sim.dl)
-        self.assertAlmostEqual(cz, 0.5 * (mon.iz0 + mon.iz1) * sim.dl)
+        cuts = []
+        for center in ((0.016, 0.016, 0.016), (0.028, 0.024, 0.028)):
+            mon = OpenCLNear2FarMonitor(sim, center, (0.012,) * 3, 5e9)
+            # Two tangential E samples give a nonconstant radiation pattern.
+            ex = np.zeros(mon.n_face_samples, dtype=sim.accreal_complex_dtype)
+            offset = mon._face_offsets[5]
+            ex[offset] = 1
+            ex[offset + mon.nyf] = 1j
+            cl.enqueue_copy(sim.queue, mon.Ex_dft_buf, ex)
+            angles, db = mon.farfield_polar_xz(distance_m=0.25, n_angles=9)
+            np.testing.assert_allclose(angles, np.linspace(-180, 180, 9))
+            self.assertTrue(np.all(np.isfinite(db)))
+            self.assertGreater(np.ptp(db), 0.1)
+            cuts.append(db)
+        np.testing.assert_allclose(*cuts, rtol=0, atol=2e-5)
 
-        # Verify farfield_polar_xz queries points centered on (cx, cy, cz).
-        captured = {}
-        orig = mon.get_farfields
+    def test_isotropic_tuple_of_planes_remains_supported(self):
+        shape = (3, 4, 4)
+        eps = np.arange(1, np.prod(shape) + 1, dtype=np.float32).reshape(shape)
+        for cls in (OpenCLFDTD, NumPyFDTD, NumPyFDTD_FaceCPML):
+            with self.subTest(cls=cls.__name__):
+                fields = []
+                for material in (tuple(eps), eps):
+                    sim = cls(shape, 1e-3, npml=0)
+                    sim.set_epsilon(material)
+                    sim.add_source_Jx(1, 2.0)
+                    fields.append(np.asarray(sim.Ex))
+                np.testing.assert_array_equal(*fields)
 
-        def _spy(pts):
-            captured["pts"] = np.asarray(pts)
-            return orig(pts)
-
-        mon.get_farfields = _spy
-        angles, db = mon.farfield_polar_xz(distance_m=10.0, n_angles=5)
-        self.assertEqual(angles.shape, (5,))
-        self.assertEqual(db.shape, (5,))
-        pts = captured["pts"]
-        # At theta=0 (middle index 2): (cx, cy, cz + 10)
-        np.testing.assert_allclose(pts[2], [cx, cy, cz + 10.0], rtol=1e-6, atol=1e-6)
+        sim = NumPyFDTD(shape, 1e-3, npml=0)
+        ragged = ([[1.0, 2.0], [3.0]], np.ones(shape), np.ones(shape))
+        with self.assertRaisesRegex(ValueError, r"Epsilon\[x\] must contain real numeric values"):
+            sim.set_epsilon(ragged)
 
 
 class TestAnisotropicLossyPecAndMixedPsiParity(unittest.TestCase):

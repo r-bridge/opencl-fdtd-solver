@@ -116,13 +116,15 @@ class OpenCLFDTD(SourceMonitorMixin):
         npml  : PML thickness in cells
         dtype : ``np.float32`` (default) or ``np.float64`` (needs device FP64)
         ctx   : pre-existing OpenCL context (optional)
-        queue : pre-existing OpenCL command queue (optional)
+        queue : pre-existing OpenCL command queue (optional); selects the
+            device and provides the context when ``ctx`` is omitted
         accum_fp64 : monitor DFT / near-to-far accumulators use double precision
             regardless of ``dtype``. Defaults to ``None``, which enables FP64
             accumulation automatically when the device supports ``cl_khr_fp64``
             (or ``cl_amd_fp64``) and ``cl_khr_int64_base_atomics``, and falls
-            back to ``False`` on FP32-only devices. Pass ``True`` to require
-            FP64 accumulation or ``False`` to force single-precision accumulation.
+            back to ``False`` when those extensions are unavailable. With
+            FP32 fields, pass ``True`` to require FP64 accumulation or ``False``
+            to keep FP32 accumulation. FP64 fields always accumulate in FP64.
         """
         shape, self.dl, self.npml = validate_grid(shape, dl, npml)
         self.Nx, self.Ny, self.Nz = shape
@@ -141,18 +143,16 @@ class OpenCLFDTD(SourceMonitorMixin):
         self.dt = COURANT_SAFETY_FACTOR * self.dl / (C0 * np.sqrt(3.0))
 
         # Setup OpenCL context and queue
-        if ctx is None:
-            self.ctx, shared_queue, self.device = _default_opencl_runtime()
-            if queue is None:
-                queue = shared_queue
-        else:
+        if queue is not None:
+            if ctx is not None and ctx != queue.context:
+                raise ValueError("OpenCL queue must belong to the supplied context")
+            self.ctx, self.queue, self.device = queue.context, queue, queue.device
+        elif ctx is not None:
             self.ctx = ctx
-            self.device = self.ctx.devices[0]
-
-        if queue is None:
-            self.queue = cl.CommandQueue(self.ctx)
+            self.queue = cl.CommandQueue(ctx)
+            self.device = self.queue.device
         else:
-            self.queue = queue
+            self.ctx, self.queue, self.device = _default_opencl_runtime()
 
         if accum_fp64 is None:
             self.accum_fp64 = dtype == np.dtype(np.float64) or self._device_supports_accum_fp64(
@@ -445,7 +445,9 @@ class OpenCLFDTD(SourceMonitorMixin):
         if self.dtype == np.dtype(np.float64):
             options.append("-DUSE_FP64=1")
         options.append(f"-DACCUM_FP64={1 if self.accum_fp64 else 0}")
-        self.program = cl.Program(self.ctx, kernel_src).build(options=options)
+        self.program = cl.Program(self.ctx, kernel_src).build(
+            options=options, devices=[self.device]
+        )
         self.kern_update_H_interior = cl.Kernel(self.program, "update_H_interior")
         self.kern_update_H_pml = cl.Kernel(self.program, "update_H_pml")
         self.kern_update_E_interior = cl.Kernel(self.program, "update_E_interior")
