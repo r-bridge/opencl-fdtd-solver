@@ -26,8 +26,6 @@ EXPECTED_KERNELS = (
     "update_E_pml",
     "add_source_Ex",
     "add_source_Jx",
-    "accumulate_dft",
-    "accumulate_dft_face",
     "accumulate_dft_faces_fused",
     "dft_rel_change_partial",
     "farfield_accumulate_nl",

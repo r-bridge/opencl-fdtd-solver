@@ -4,97 +4,6 @@
  * This file is part of opencl-fdtd-solver (GPLv3 or later).
  */
 
-/* Legacy full-box DFT (volume buffer); prefer accumulate_dft_face. */
-__kernel void accumulate_dft(
-    int Nx, int Ny, int Nz,
-    int ix0, int ix1,
-    int iy0, int iy1,
-    int iz0, int iz1,
-    real phase_real, real phase_imag,
-    __global const real *field,
-    __global real2 *field_dft
-) {
-    int k = get_global_id(0);
-    int j = get_global_id(1);
-    int i = get_global_id(2);
-
-    int x_dim = ix1 - ix0 + 1;
-    int y_dim = iy1 - iy0 + 1;
-    int z_dim = iz1 - iz0 + 1;
-
-    if (i >= x_dim || j >= y_dim || k >= z_dim) return;
-
-    int abs_i = ix0 + i;
-    int abs_j = iy0 + j;
-    int abs_k = iz0 + k;
-
-    if (abs_i == ix0 || abs_i == ix1 || abs_j == iy0 || abs_j == iy1 || abs_k == iz0 || abs_k == iz1) {
-        int idx = abs_i * Ny * Nz + abs_j * Nz + abs_k;
-        real val = field[idx];
-
-        real2 current_dft = field_dft[idx];
-        current_dft.x += val * phase_real;
-        current_dft.y += val * phase_imag;
-        field_dft[idx] = current_dft;
-    }
-}
-
-/*
- * Accumulate DFT onto one Huygens face into a packed real2 buffer.
- * face_id: 0=x0, 1=x1, 2=y0, 3=y1, 4=z0, 5=z1
- * Work size: (u, v) with u along the first face axis, v the second
- *   x-faces: (nzf, nyf) → abs (ix, iy0+v, iz0+u)
- *   y-faces: (nzf, nxf) → abs (ix0+v, iy, iz0+u)
- *   z-faces: (nyf, nxf) → abs (ix0+v, iy0+u, iz)
- */
-__kernel void accumulate_dft_face(
-    int Nx, int Ny, int Nz,
-    int face_id,
-    int ix0, int ix1,
-    int iy0, int iy1,
-    int iz0, int iz1,
-    int face_offset,
-    real phase_real, real phase_imag,
-    __global const real *field,
-    __global real2 *face_dft
-) {
-    int u = get_global_id(0);
-    int v = get_global_id(1);
-    int abs_i, abs_j, abs_k;
-    int nxf = ix1 - ix0 + 1;
-    int nyf = iy1 - iy0 + 1;
-    int nzf = iz1 - iz0 + 1;
-    int face_li;
-
-    if (face_id == 0 || face_id == 1) {
-        if (u >= nzf || v >= nyf) return;
-        abs_i = (face_id == 0) ? ix0 : ix1;
-        abs_j = iy0 + v;
-        abs_k = iz0 + u;
-        face_li = v * nzf + u;
-    } else if (face_id == 2 || face_id == 3) {
-        if (u >= nzf || v >= nxf) return;
-        abs_i = ix0 + v;
-        abs_j = (face_id == 2) ? iy0 : iy1;
-        abs_k = iz0 + u;
-        face_li = v * nzf + u;
-    } else {
-        if (u >= nyf || v >= nxf) return;
-        abs_i = ix0 + v;
-        abs_j = iy0 + u;
-        abs_k = (face_id == 4) ? iz0 : iz1;
-        face_li = v * nyf + u;
-    }
-
-    int idx = abs_i * Ny * Nz + abs_j * Nz + abs_k;
-    real val = field[idx];
-    int dst = face_offset + face_li;
-    real2 cur = face_dft[dst];
-    cur.x += val * phase_real;
-    cur.y += val * phase_imag;
-    face_dft[dst] = cur;
-}
-
 inline void dft_add(__global accreal2 *slot, real val, accreal pr, accreal pi) {
     accreal2 cur = *slot;
     cur.x += (accreal)val * pr;
@@ -103,15 +12,14 @@ inline void dft_add(__global accreal2 *slot, real val, accreal pr, accreal pi) {
 }
 
 /*
- * One launch over packed face samples: for each Huygens face sample,
- * DFT only the tangential Ex..Hz components that enter the N/L integral.
- * Replaces 36 per-step accumulate_dft_face launches.
+ * One launch over packed face samples of a closed Yee Huygens box
+ * [ix0..ix1] x [iy0..iy1] x [iz0..iz1]:
+ *   x-faces (i = ix0, ix1): nyf = iy1 - iy0, nzf = iz1 - iz0 cells at (i, j+0.5, k+0.5)
+ *   y-faces (j = iy0, iy1): nxf = ix1 - ix0, nzf = iz1 - iz0 cells at (i+0.5, j, k+0.5)
+ *   z-faces (k = iz0, iz1): nxf = ix1 - ix0, nyf = iy1 - iy0 cells at (i+0.5, j+0.5, k)
  *
- * Phase args and the output buffers accumulate at `accreal` precision
- * (double by default, see precision.cl) even though the field samples
- * themselves (`Ex`..`Hz`, from the volumetric grid) stay at `real`
- * (fp32) precision — this targets round-off compounding across the
- * 12k-step running sum without doubling the ~8GB volumetric grid.
+ * Phase args and output buffers accumulate at `accreal` precision (double when
+ * ACCUM_FP64=1) even when volumetric fields (`Ex`..`Hz`) are `real` (fp32).
  */
 __kernel void accumulate_dft_faces_fused(
     int Nx, int Ny, int Nz,
@@ -138,9 +46,9 @@ __kernel void accumulate_dft_faces_fused(
     int face_i = get_global_id(0);
     if (face_i >= n_face) return;
 
-    int nxf = ix1 - ix0 + 1;
-    int nyf = iy1 - iy0 + 1;
-    int nzf = iz1 - iz0 + 1;
+    int nxf = ix1 - ix0;
+    int nyf = iy1 - iy0;
+    int nzf = iz1 - iz0;
     int face, loc, abs_i, abs_j, abs_k;
 
     if (face_i < off1) {
@@ -164,7 +72,6 @@ __kernel void accumulate_dft_faces_fused(
     }
     (void)nxf;
 
-    int idx = abs_i * Ny * Nz + abs_j * Nz + abs_k;
     accreal pr_e = phase_e_real, pi_e = phase_e_imag;
     accreal pr_h = phase_h_real, pi_h = phase_h_imag;
 
@@ -215,9 +122,9 @@ __kernel void accumulate_dft_faces_fused(
         real ex = AVG2(AT(Ex, abs_i, abs_j, abs_k), AT(Ex, abs_i, j1, abs_k), j1 != abs_j);
         real ey = AVG2(AT(Ey, abs_i, abs_j, abs_k), AT(Ey, i1, abs_j, abs_k), i1 != abs_i);
         real hx00 = AT(Hx, abs_i, abs_j, abs_k), hx10 = AT(Hx, abs_i, abs_j, k_lo);
-        real hx01 = AT(Hx, abs_i, j1, abs_k), hx11 = AT(Hx, abs_i, j1, k_lo);
+        real hx01 = AT(Hx, i1, abs_j, abs_k), hx11 = AT(Hx, i1, abs_j, k_lo);
         real hy00 = AT(Hy, abs_i, abs_j, abs_k), hy10 = AT(Hy, abs_i, abs_j, k_lo);
-        real hy01 = AT(Hy, i1, abs_j, abs_k), hy11 = AT(Hy, i1, abs_j, k_lo);
+        real hy01 = AT(Hy, abs_i, j1, abs_k), hy11 = AT(Hy, abs_i, j1, k_lo);
         real hx = (real)0.25 * (hx00 + hx10 + hx01 + hx11);
         real hy = (real)0.25 * (hy00 + hy10 + hy01 + hy11);
         dft_add(&Ex_dft[face_i], ex, pr_e, pi_e);
@@ -368,11 +275,12 @@ inline void atomic_add_accreal2(__global accreal2 *addr, accreal2 val) {
     atomic_add_accreal(&p[1], val.y);
 }
 
-/* Contribution of one packed face sample into N,L (6 real2). */
+/* Contribution of one closed-box midpoint face sample into N,L (6 accreal2).
+ * All coordinates, phase, and quadrature weights run in accreal precision. */
 inline void face_sample_NL(
     int face_i,
-    real rx, real ry, real rz,
-    real k_wave, real dA, real dl,
+    accreal rx, accreal ry, accreal rz,
+    accreal k_wave, accreal dA, accreal dl,
     int ix0, int ix1, int iy0, int iy1, int iz0, int iz1,
     int off0, int off1, int off2, int off3, int off4, int off5,
     __global const accreal2 *Ex_f,
@@ -384,64 +292,51 @@ inline void face_sample_NL(
     accreal2 *Nx, accreal2 *Ny, accreal2 *Nz,
     accreal2 *Lx, accreal2 *Ly, accreal2 *Lz
 ) {
-    int nxf = ix1 - ix0 + 1;
-    int nyf = iy1 - iy0 + 1;
-    int nzf = iz1 - iz0 + 1;
+    int nxf = ix1 - ix0;
+    int nyf = iy1 - iy0;
+    int nzf = iz1 - iz0;
     int face, loc, abs_i, abs_j, abs_k;
-    real nf, xp, yp, zp;
+    accreal nfa, xp, yp, zp;
 
     if (face_i < off1) {
-        face = 0; loc = face_i - off0; nf = -(real)1.0;
+        face = 0; loc = face_i - off0; nfa = -(accreal)1.0;
         abs_i = ix0; abs_j = iy0 + loc / nzf; abs_k = iz0 + (loc - (loc / nzf) * nzf);
     } else if (face_i < off2) {
-        face = 1; loc = face_i - off1; nf = (real)1.0;
+        face = 1; loc = face_i - off1; nfa = (accreal)1.0;
         abs_i = ix1; abs_j = iy0 + loc / nzf; abs_k = iz0 + (loc - (loc / nzf) * nzf);
     } else if (face_i < off3) {
-        face = 2; loc = face_i - off2; nf = -(real)1.0;
+        face = 2; loc = face_i - off2; nfa = -(accreal)1.0;
         abs_i = ix0 + loc / nzf; abs_j = iy0; abs_k = iz0 + (loc - (loc / nzf) * nzf);
     } else if (face_i < off4) {
-        face = 3; loc = face_i - off3; nf = (real)1.0;
+        face = 3; loc = face_i - off3; nfa = (accreal)1.0;
         abs_i = ix0 + loc / nzf; abs_j = iy1; abs_k = iz0 + (loc - (loc / nzf) * nzf);
     } else if (face_i < off5) {
-        face = 4; loc = face_i - off4; nf = -(real)1.0;
+        face = 4; loc = face_i - off4; nfa = -(accreal)1.0;
         abs_i = ix0 + loc / nyf; abs_j = iy0 + (loc - (loc / nyf) * nyf); abs_k = iz0;
     } else {
-        face = 5; loc = face_i - off5; nf = (real)1.0;
+        face = 5; loc = face_i - off5; nfa = (accreal)1.0;
         abs_i = ix0 + loc / nyf; abs_j = iy0 + (loc - (loc / nyf) * nyf); abs_k = iz1;
     }
     (void)nxf;
-    /* Surface sample at face-center (half-cell offset in the two tangential axes). */
+    /* Closed-box midpoint quadrature: each sample owns an exact dl x dl patch
+     * centered at the face-center with uniform weight 1.0 (no gaps or overhang). */
     if (face <= 1) {
-        xp = abs_i * dl;
-        yp = (abs_j + (real)0.5) * dl;
-        zp = (abs_k + (real)0.5) * dl;
+        xp = (accreal)abs_i * dl;
+        yp = ((accreal)abs_j + (accreal)0.5) * dl;
+        zp = ((accreal)abs_k + (accreal)0.5) * dl;
     } else if (face <= 3) {
-        xp = (abs_i + (real)0.5) * dl;
-        yp = abs_j * dl;
-        zp = (abs_k + (real)0.5) * dl;
+        xp = ((accreal)abs_i + (accreal)0.5) * dl;
+        yp = (accreal)abs_j * dl;
+        zp = ((accreal)abs_k + (accreal)0.5) * dl;
     } else {
-        xp = (abs_i + (real)0.5) * dl;
-        yp = (abs_j + (real)0.5) * dl;
-        zp = abs_k * dl;
+        xp = ((accreal)abs_i + (accreal)0.5) * dl;
+        yp = ((accreal)abs_j + (accreal)0.5) * dl;
+        zp = (accreal)abs_k * dl;
     }
     int li = face_i;
-    real phase = k_wave * (rx * xp + ry * yp + rz * zp);
-    accreal2 ph = (accreal2)(cos((accreal)phase), -sin((accreal)phase));
-
-    /* Trapezoidal face quadrature: half weight on edges, quarter on corners. */
-    real wj, wk;
-    if (face <= 1) {
-        wj = (abs_j == iy0 || abs_j == iy1) ? (real)0.5 : (real)1.0;
-        wk = (abs_k == iz0 || abs_k == iz1) ? (real)0.5 : (real)1.0;
-    } else if (face <= 3) {
-        wj = (abs_i == ix0 || abs_i == ix1) ? (real)0.5 : (real)1.0;
-        wk = (abs_k == iz0 || abs_k == iz1) ? (real)0.5 : (real)1.0;
-    } else {
-        wj = (abs_i == ix0 || abs_i == ix1) ? (real)0.5 : (real)1.0;
-        wk = (abs_j == iy0 || abs_j == iy1) ? (real)0.5 : (real)1.0;
-    }
-    accreal dAw = (accreal)(dA * wj * wk);
-    accreal nfa = (accreal)nf;
+    accreal phase = k_wave * (rx * xp + ry * yp + rz * zp);
+    accreal2 ph = (accreal2)(cos(phase), -sin(phase));
+    accreal dAw = dA;
 
     if (face <= 1) {
         accreal2 Jy = cmul_acc((accreal2)( nfa * Hz_f[li].x,  nfa * Hz_f[li].y), ph);
@@ -480,9 +375,9 @@ inline void face_sample_NL(
 __kernel void farfield_accumulate_nl(
     int n_face,
     int n_obs,
-    __global const real *obs_xyz,
-    real k_wave,
-    real dl,
+    __global const accreal *obs_xyz,
+    accreal k_wave,
+    accreal dl,
     int ix0, int ix1,
     int iy0, int iy1,
     int iz0, int iz1,
@@ -509,13 +404,13 @@ __kernel void farfield_accumulate_nl(
     accreal2 Lz = (accreal2)((accreal)0.0, (accreal)0.0);
 
     if (face_i < n_face && obs < n_obs) {
-        real ox = obs_xyz[3 * obs + 0];
-        real oy = obs_xyz[3 * obs + 1];
-        real oz = obs_xyz[3 * obs + 2];
-        real r = sqrt(ox * ox + oy * oy + oz * oz);
-        if (r < (real)1.0e-30) r = (real)1.0e-30;
-        real rx = ox / r, ry = oy / r, rz = oz / r;
-        real dA = dl * dl;
+        accreal ox = obs_xyz[3 * obs + 0];
+        accreal oy = obs_xyz[3 * obs + 1];
+        accreal oz = obs_xyz[3 * obs + 2];
+        accreal r = sqrt(ox * ox + oy * oy + oz * oz);
+        if (r < (accreal)1.0e-30) r = (accreal)1.0e-30;
+        accreal rx = ox / r, ry = oy / r, rz = oz / r;
+        accreal dA = dl * dl;
         face_sample_NL(
             face_i, rx, ry, rz, k_wave, dA, dl,
             ix0, ix1, iy0, iy1, iz0, iz1,
@@ -558,18 +453,18 @@ __kernel void farfield_accumulate_nl(
 /* Convert integrated N,L → far E,H for each observation. */
 __kernel void farfield_nl_to_eh(
     int n_obs,
-    __global const real *obs_xyz,
-    real k_wave,
-    real eta0,
+    __global const accreal *obs_xyz,
+    accreal k_wave,
+    accreal eta0,
     __global const accreal2 *NL_in,
     __global accreal2 *EH_out
 ) {
     int p = get_global_id(0);
     if (p >= n_obs) return;
 
-    accreal ox = (accreal)obs_xyz[3 * p + 0];
-    accreal oy = (accreal)obs_xyz[3 * p + 1];
-    accreal oz = (accreal)obs_xyz[3 * p + 2];
+    accreal ox = obs_xyz[3 * p + 0];
+    accreal oy = obs_xyz[3 * p + 1];
+    accreal oz = obs_xyz[3 * p + 2];
     accreal r = sqrt(ox * ox + oy * oy + oz * oz);
     if (r < (accreal)1.0e-30) r = (accreal)1.0e-30;
     accreal rx = ox / r, ry = oy / r, rz = oz / r;

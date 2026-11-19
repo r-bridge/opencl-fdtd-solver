@@ -219,8 +219,47 @@ class TestPmlReflection(unittest.TestCase):
         r_db = 20.0 * np.log10(max(r, 1e-30))
         self.assertLess(
             r_db,
-            -25.0,
-            f"CPML |R|={r:.3e} ({r_db:.1f} dB); expected < -25 dB",
+            -50.0,
+            f"CPML |R|={r:.3e} ({r_db:.1f} dB); expected < -50 dB",
+        )
+
+    def test_low_and_high_z_pml_reflection_symmetric_and_below_minus_50db(self):
+        """Both -z and +z CPML faces must absorb below -50 dB with matching performance."""
+        npml = 12
+        n_steps = 360
+        # +z face
+        z_src_p, z_probe_p = 36, 70
+        p_s_p = self._probe_trace(
+            nz=z_probe_p + 8 + npml, npml=npml, z_src=z_src_p, z_probe=z_probe_p, n_steps=n_steps
+        )
+        p_l_p = self._probe_trace(
+            nz=z_probe_p + 100 + npml, npml=npml, z_src=z_src_p, z_probe=z_probe_p, n_steps=n_steps
+        )
+        i_inc_p = int(np.argmax(np.abs(p_l_p)))
+        r_p_db = 20.0 * np.log10(
+            max(float(np.max(np.abs((p_s_p - p_l_p)[i_inc_p + 20 :]))) / float(np.max(np.abs(p_l_p))), 1e-30)
+        )
+        # -z face (mirror geometry)
+        z_probe_ms = npml + 8
+        z_src_ms = z_probe_ms + 34
+        p_s_m = self._probe_trace(
+            nz=z_src_ms + 100 + npml, npml=npml, z_src=z_src_ms, z_probe=z_probe_ms, n_steps=n_steps
+        )
+        z_probe_ml = npml + 100
+        z_src_ml = z_probe_ml + 34
+        p_l_m = self._probe_trace(
+            nz=z_src_ml + 100 + npml, npml=npml, z_src=z_src_ml, z_probe=z_probe_ml, n_steps=n_steps
+        )
+        i_inc_m = int(np.argmax(np.abs(p_l_m)))
+        r_m_db = 20.0 * np.log10(
+            max(float(np.max(np.abs((p_s_m - p_l_m)[i_inc_m + 20 :]))) / float(np.max(np.abs(p_l_m))), 1e-30)
+        )
+        self.assertLess(r_p_db, -50.0, f"+z CPML reflection {r_p_db:.2f} dB; expected < -50 dB")
+        self.assertLess(r_m_db, -50.0, f"-z CPML reflection {r_m_db:.2f} dB; expected < -50 dB")
+        self.assertLess(
+            abs(r_p_db - r_m_db),
+            3.0,
+            f"CPML -z ({r_m_db:.2f} dB) vs +z ({r_p_db:.2f} dB) asymmetry > 3 dB",
         )
 
 

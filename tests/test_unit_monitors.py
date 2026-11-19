@@ -82,15 +82,15 @@ class TestOpenCLNear2FarMonitor(unittest.TestCase):
             mon.farfield_polar_xz(distance_m=0.0)
 
     def test_fetch_dft_fields_scatters_tangential(self):
-        _, mon = self._small_run()
+        fdtd, mon = self._small_run()
         faces = mon.fetch_dft_fields()
         self.assertEqual(set(faces), {"Ex", "Ey", "Ez", "Hx", "Hy", "Hz"})
         self.assertEqual(mon.Ex_dft.shape, (24, 24, 24))
         # At least one tangential slot on an x-face should be nonzero after driving Ex.
         face_power = sum(float(np.max(np.abs(v))) for v in faces.values())
         self.assertGreater(face_power, 0.0)
-        # Normal-only slots on x-faces may stay zero (tangential-only DFT).
-        self.assertEqual(mon.Ex_dft.dtype, np.complex64)
+        # Normal-only slots on x-faces stay zero (tangential-only DFT).
+        self.assertEqual(mon.Ex_dft.dtype, fdtd.accreal_complex_dtype)
 
     def test_phase_recurrence_stable_across_steps(self):
         shape = (20, 20, 20)

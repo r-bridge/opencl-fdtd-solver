@@ -59,14 +59,26 @@ def _yee_edge_average(values: np.ndarray, axes: tuple[int, int]) -> np.ndarray:
     return total
 
 
-def yee_edge_eps(eps_r: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def yee_edge_eps(
+    eps_r: np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Average cell-centered ``εᵣ`` onto Yee E-edge locations.
 
+    Accepts either an isotropic 3-D array ``eps_r`` or a diagonal anisotropic
+    3-tuple ``(eps_x, eps_y, eps_z)``.
     ``Ex`` lives at ``(i+½, j, k)``, ``Ey`` at ``(i, j+½, k)``, ``Ez`` at
     ``(i, j, k+½)``. Each edge averages the cells adjacent to it in the two
     transverse directions (four cells in the interior); at domain boundaries,
     only in-domain neighboring cells contribute.
     """
+    if isinstance(eps_r, tuple):
+        if len(eps_r) != 3:
+            raise ValueError(f"Expected 3-tuple (eps_x, eps_y, eps_z), got {len(eps_r)}")
+        ex, ey, ez = (
+            _yee_edge_average(np.asarray(comp, dtype=np.float64), axes)
+            for comp, axes in zip(eps_r, _EDGE_TRANSVERSE_AXES)
+        )
+        return ex, ey, ez
     eps = np.asarray(eps_r, dtype=np.float64)
     ex, ey, ez = (_yee_edge_average(eps, axes) for axes in _EDGE_TRANSVERSE_AXES)
     return ex, ey, ez

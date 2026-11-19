@@ -29,7 +29,7 @@ from ._validation import (
 )
 from .constants import C0, EPS0, MU0
 from .cpml import build_cpml_profiles
-from .materials import yee_edge_ce
+from .materials import yee_edge_ca_cb, yee_edge_ce, yee_edge_pec
 from .plugin import SourceMonitorMixin
 
 
@@ -63,6 +63,9 @@ class NumPyFDTD(SourceMonitorMixin):
         self._ce_x = np.full(shape, self.dt / EPS0, dtype=dtype)
         self._ce_y = np.full(shape, self.dt / EPS0, dtype=dtype)
         self._ce_z = np.full(shape, self.dt / EPS0, dtype=dtype)
+        self._ca_x = None
+        self._ca_y = None
+        self._ca_z = None
 
         self._sources = []
         self._monitors = []
@@ -70,19 +73,52 @@ class NumPyFDTD(SourceMonitorMixin):
 
         self._build_cpml()
 
-    def set_epsilon(self, eps_array):
-        """Set cell-centered ``εᵣ`` (shape ``(Nx, Ny, Nz)``).
+    def set_epsilon(self, eps_array, sigma_array=None, pec_mask=None):
+        """Set cell-centered ``εᵣ`` (isotropic 3-D array or diagonal anisotropic
+        3-tuple ``(eps_x, eps_y, eps_z)``), optional ohmic conductivity ``σ``
+        [S/m], and optional boolean ``pec_mask`` (shape ``(Nx, Ny, Nz)``).
 
         Edge placement matches ``OpenCLFDTD``: each Yee E-edge averages the
-        four cells that own it (``materials.yee_edge_eps``). Conductivity and
-        PEC masks are OpenCL-only. Relative permittivity must be finite and at
-        least 1 (nondispersive dielectric; the fixed vacuum-based timestep
-        would leave the 3-D CFL limit below 0.9801 anyway).
+        four cells that own it (``materials.yee_edge_eps``). Relative
+        permittivity must be finite and at least 1 (nondispersive dielectric;
+        the fixed vacuum-based timestep would leave the 3-D CFL limit below
+        0.9801 anyway); conductivity must be finite and nonnegative.
         """
         expected = (self.Nx, self.Ny, self.Nz)
-        eps_array, _ = validate_material_arrays(eps_array, None, expected)
-        self.eps_r = eps_array.astype(self.dtype)
-        self._ce_x, self._ce_y, self._ce_z = yee_edge_ce(self.eps_r, self.dt, dtype=self.dtype)
+        eps_array, sigma_array = validate_material_arrays(eps_array, sigma_array, expected)
+        if pec_mask is not None:
+            pec_mask = np.asarray(pec_mask, dtype=bool)
+            if pec_mask.shape != expected:
+                raise ValueError(
+                    f"PEC mask shape mismatch: expected {expected}, got {tuple(pec_mask.shape)}"
+                )
+
+        if isinstance(eps_array, tuple):
+            self.eps_r = tuple(arr.astype(self.dtype) for arr in eps_array)
+        else:
+            self.eps_r = eps_array.astype(self.dtype)
+
+        if sigma_array is None:
+            cb_x, cb_y, cb_z = yee_edge_ce(eps_array, self.dt, dtype=self.dtype)
+            if pec_mask is None:
+                self._ce_x, self._ce_y, self._ce_z = cb_x, cb_y, cb_z
+                self._ca_x = self._ca_y = self._ca_z = None
+                return
+            ca_x = np.ones(expected, dtype=self.dtype)
+            ca_y = ca_x.copy()
+            ca_z = ca_x.copy()
+        else:
+            (ca_x, ca_y, ca_z), (cb_x, cb_y, cb_z) = yee_edge_ca_cb(
+                eps_array, sigma_array, self.dt, dtype=self.dtype
+            )
+
+        if pec_mask is not None:
+            px, py, pz = yee_edge_pec(pec_mask)
+            for arr, m in ((ca_x, px), (ca_y, py), (ca_z, pz), (cb_x, px), (cb_y, py), (cb_z, pz)):
+                arr[m] = 0
+
+        self._ca_x, self._ca_y, self._ca_z = ca_x, ca_y, ca_z
+        self._ce_x, self._ce_y, self._ce_z = cb_x, cb_y, cb_z
 
     def add_source_Ex(self, z_src, amp, i0=None, i1=None, j0=None, j1=None):
         """Soft-add a sheet amplitude directly onto ``Ex`` (legacy field inject).
@@ -242,19 +278,20 @@ class NumPyFDTD(SourceMonitorMixin):
         np.copyto(psi, work_a, casting="unsafe")
 
     def _apply_curl(
-        self, field, derivative_a, derivative_b, kappa_a, kappa_b, psi_a, psi_b, scale, add
+        self, field, derivative_a, derivative_b, kappa_a, kappa_b, psi_a, psi_b, scale, add, ca=None
     ):
         np.divide(derivative_a, kappa_a * self.dl, out=derivative_a)
         np.add(derivative_a, psi_a, out=derivative_a)
         np.divide(derivative_b, kappa_b * self.dl, out=derivative_b)
         np.add(derivative_b, psi_b, out=derivative_b)
         np.subtract(derivative_a, derivative_b, out=derivative_a)
+        if ca is not None:
+            np.multiply(field, ca, out=field)
+        np.multiply(derivative_a, scale, out=derivative_a)
         if add:
-            np.multiply(derivative_a, scale, out=derivative_a)
-            np.add(field, derivative_a, out=field)
+            np.add(field, derivative_a, out=field, casting="unsafe")
         else:
-            np.multiply(derivative_a, scale, out=derivative_a)
-            np.subtract(field, derivative_a, out=field)
+            np.subtract(field, derivative_a, out=field, casting="unsafe")
 
     def _update_H(self):
         self._ensure_update_scratch()
@@ -336,6 +373,7 @@ class NumPyFDTD(SourceMonitorMixin):
             b_b,
             c_b,
             ce,
+            ca,
         ) in (
             (
                 self.Ex,
@@ -352,6 +390,7 @@ class NumPyFDTD(SourceMonitorMixin):
                 self._bz_e,
                 self._cz_e,
                 self._ce_x,
+                self._ca_x,
             ),
             (
                 self.Ey,
@@ -368,6 +407,7 @@ class NumPyFDTD(SourceMonitorMixin):
                 self._bx_e,
                 self._cx_e,
                 self._ce_y,
+                self._ca_y,
             ),
             (
                 self.Ez,
@@ -384,6 +424,7 @@ class NumPyFDTD(SourceMonitorMixin):
                 self._by_e,
                 self._cy_e,
                 self._ce_z,
+                self._ca_z,
             ),
         ):
             self._difference_into(f_a, axis_a, False, d_a)
@@ -391,7 +432,7 @@ class NumPyFDTD(SourceMonitorMixin):
             if self.npml > 0:
                 self._update_psi(psi_a, b_a, c_a, d_a, work_a, work_b)
                 self._update_psi(psi_b, b_b, c_b, d_b, work_a, work_b)
-            self._apply_curl(field, d_a, d_b, kappa_a, kappa_b, psi_a, psi_b, ce, add=True)
+            self._apply_curl(field, d_a, d_b, kappa_a, kappa_b, psi_a, psi_b, ce, add=True, ca=ca)
 
     def step(self):
         self._step_fields()

@@ -168,8 +168,8 @@ Outer layers use **complex-frequency-shifted convolutional PML** with polynomial
 | Thickness | `npml` cells (constructor default **20**; validation cases often 4–12) |
 | Grading order \(m\) | 3 |
 | \(\sigma_{\max}\) | \(0.8\,(m+1)/(\eta_0\Delta\ell)\) |
-| \(\kappa_{\max}\) | 15 |
-| \(\alpha_{\max}\) | \(0.05/\eta_0\) at the vacuum interface, decaying toward the outer wall |
+| \(\kappa_{\max}\) | 5 |
+| \(\alpha_{\max}\) | \(0.05/(\eta_0\Delta\ell)\) at the vacuum interface, decaying toward the outer wall |
 
 Separate 1-D profiles are built for E-node and H-node locations (half-cell stagger). Auxiliary ψ fields implement the CFS convolution; the OpenCL engine stores them on **PML face slabs** only (not the full volume).
 
@@ -224,7 +224,7 @@ A closed rectangular **Huygens surface** is defined in physical metres and snapp
 Face DFT uses \(\int f(t)e^{+i\omega t}\,dt\). **H** carries the half-step
 phase \(e^{-i\omega\Delta t/2}\) so E and H are co-located in time for the
 integral. Radiation integrals \(\mathbf{N},\mathbf{L}\) of the currents above
-use phase \(e^{-ik\hat r\cdot\mathbf{r}'}\) and trapezoidal edge/corner weights.
+use phase \(e^{-ik\hat r\cdot\mathbf{r}'}\) and closed-box midpoint quadrature (exact \(\Delta\ell^2\) patches over `[i0..i1-1]`, `[j0..j1-1]`, `[k0..k1-1]` with uniform weight 1).
 
 Far fields with this Fourier convention (outgoing \(e^{+ikr}\)):
 
@@ -345,7 +345,7 @@ for every supported configuration or certification of a device design.
 
 Use this when deciding whether results are trustworthy for your problem.
 
-1. **Is my problem inside the model?** Scalar nondispersive ε, μ=μ₀, no PEC/periodic BCs, uniform Δℓ; FP32 enough or need `dtype=float64`?
+1. **Is my problem inside the model?** Isotropic or diagonal anisotropic nondispersive ε, optional ohmic σ / cell-centered `pec_mask`, μ=μ₀, no periodic BCs, uniform Δℓ; FP32 enough or need `dtype=float64`?
 2. **Resolution:** \(\Delta\ell\) small enough for the shortest wavelength *inside* the highest ε (rule of thumb: ≥10–20 cells/λ).
 3. **Courant:** leave at default \(0.99/\sqrt{3}\) unless you knowingly rematch any reference.
 4. **Materials:** supply a cell-wise εᵣ you trust (average subpixels yourself if needed).
@@ -361,7 +361,7 @@ Use this when deciding whether results are trustworthy for your problem.
 Prefer Meep or a commercial code if you need any of:
 
 - dispersive / magnetic media,
-- PEC, periodic, or symmetry boundaries,
+- periodic or symmetry boundaries (cell-centered `pec_mask` is supported via `set_epsilon`),
 - built-in geometry, subpixel averaging, or eigenmode ports,
 - certification of a specific fabricated device without your own meshing pipeline.
 

@@ -36,6 +36,8 @@ def validate_grid(shape, dl, npml):
 def validate_material_arrays(eps_array, sigma_array, expected_shape):
     """Return ``(eps, sigma)`` after validating shape, values, and the εᵣ bound.
 
+    ``eps_array`` may be a single 3-D isotropic array of shape ``expected_shape``
+    or a 3-tuple ``(eps_x, eps_y, eps_z)`` for diagonal anisotropic media.
     Each array is checked on a float64 working copy (realness, finiteness,
     ``eps >= MIN_EPSILON_R``, ``sigma >= 0``). Inputs that are already real
     numeric NumPy arrays (bool, integer or float dtype) are returned as the
@@ -60,14 +62,28 @@ def validate_material_arrays(eps_array, sigma_array, expected_shape):
         original = np.asarray(values)
         return original if original.dtype.kind in "biuf" else array
 
-    eps = _real_array(eps_array, "Epsilon")
-    if np.any(eps < MIN_EPSILON_R):
-        raise ValueError(
-            f"Relative permittivity must be at least {MIN_EPSILON_R:g} "
-            "(nondispersive dielectric; values below 1 would also exceed the "
-            f"fixed Courant factor {COURANT_SAFETY_FACTOR:g} below "
-            f"{COURANT_SAFETY_FACTOR**2:g})"
+    def _check_eps_one(values, name):
+        arr = _real_array(values, name)
+        if np.any(arr < MIN_EPSILON_R):
+            raise ValueError(
+                f"Relative permittivity must be at least {MIN_EPSILON_R:g} "
+                "(nondispersive dielectric; values below 1 would also exceed the "
+                f"fixed Courant factor {COURANT_SAFETY_FACTOR:g} below "
+                f"{COURANT_SAFETY_FACTOR**2:g})"
+            )
+        return arr
+
+    if isinstance(eps_array, tuple):
+        if len(eps_array) != 3:
+            raise ValueError(
+                f"Anisotropic epsilon tuple must have 3 components (eps_x, eps_y, eps_z); got {len(eps_array)}"
+            )
+        eps = tuple(
+            _check_eps_one(comp, f"Epsilon[{ax}]")
+            for ax, comp in zip(("x", "y", "z"), eps_array)
         )
+    else:
+        eps = _check_eps_one(eps_array, "Epsilon")
 
     sigma = None
     if sigma_array is not None:

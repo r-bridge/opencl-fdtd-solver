@@ -201,7 +201,7 @@ class TestFarfieldPhysics(unittest.TestCase):
             for shift in (0, 0.001):
                 mon = cls(s, (0.008, 0.008, 0.008 + shift), (0.004,) * 3, 5e9)
                 for name, value in (("Ex", 1.0), ("Hy", 1.0 / ETA0)):
-                    data = np.zeros(mon.n_face_samples, dtype=np.complex64)
+                    data = np.zeros(mon.n_face_samples, dtype=s.accreal_complex_dtype)
                     data[mon._face_offsets[5] :] = value
                     if isinstance(mon, NumPyNear2FarMonitor):
                         getattr(mon, name + "_dft_f")[:] = data
@@ -228,7 +228,7 @@ class TestFarfieldPhysics(unittest.TestCase):
                     start = cpu._face_offsets[face]
                     count = cpu._face_counts[face]
                     for name, value in zip(names, np.concatenate((e, h))):
-                        data = np.zeros(cpu.n_face_samples, dtype=np.complex64)
+                        data = np.zeros(cpu.n_face_samples, dtype=s.accreal_complex_dtype)
                         data[start : start + count] = value
                         getattr(cpu, name + "_dft_f")[:] = data
                         cl.enqueue_copy(s.queue, getattr(gpu, name + "_dft_buf"), data)

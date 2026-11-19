@@ -28,8 +28,9 @@ from .constants import EPS0, ETA0
 
 # Polynomial grading order (Taflove).
 CPML_M = 3
-# Outer-boundary κ stretch (κ ≡ 1 was the previous default).
-CPML_KAPPA_MAX = 15.0
+# Outer-boundary κ stretch (kept ≤ 5 so λ/κ stays well above the Yee Nyquist
+# limit at 10-20 cells/λ and avoids internal PML Bragg reflection).
+CPML_KAPPA_MAX = 5.0
 # CFS α at the vacuum interface (decays to 0 at the outer wall).
 CPML_ALPHA_MAX_OVER_ETA0 = 0.05
 
@@ -57,12 +58,19 @@ def sigma_max(dl: float, *, m: int = CPML_M) -> float:
 def _xi(npml: int, i: int, *, lo: bool, node_offset: float) -> float:
     """Normalised depth into the PML (1 at outer wall, ~0 at vacuum interface).
 
-    ``node_offset`` is 0 for E-aligned samples and 0.5 for H-aligned samples
-    (half-cell stagger between the dual Yee grids).
+    ``node_offset`` is 0 for E-aligned samples (at ``idx``) and 0.5 for
+    H-aligned samples (at ``idx + 0.5``).
+
+    On the low side (``idx = i``), the vacuum-PML interface sits at ``npml`` so
+    ``H[i]`` lies half a cell closer to the interior than ``E[i]``.
+    On the high side (``idx = n - npml + i``), the last interior node is
+    ``H[n - npml - 1]`` at ``n - npml - 0.5``, so ``E[n - npml + i]`` sits
+    ``i + 0.5`` cells deep and ``H[n - npml + i]`` sits ``i + 1.0`` cells deep
+    (half a cell *deeper* than ``E``, exact dual-grid mirror of the low side).
     """
     if lo:
         return (npml - i - node_offset) / npml
-    return (i + 1 - node_offset) / npml
+    return (i + 0.5 + node_offset) / npml
 
 
 def build_cpml_1d(
@@ -90,7 +98,7 @@ def build_cpml_1d(
 
     sig_max = sigma_max(dl, m=m)
     if alpha_max is None:
-        alpha_max = CPML_ALPHA_MAX_OVER_ETA0 / ETA0
+        alpha_max = CPML_ALPHA_MAX_OVER_ETA0 / (ETA0 * float(dl))
 
     for i in range(npml):
         for lo, idx in ((True, i), (False, n - npml + i)):
