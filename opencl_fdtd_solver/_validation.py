@@ -79,8 +79,7 @@ def validate_material_arrays(eps_array, sigma_array, expected_shape):
                 f"Anisotropic epsilon tuple must have 3 components (eps_x, eps_y, eps_z); got {len(eps_array)}"
             )
         eps = tuple(
-            _check_eps_one(comp, f"Epsilon[{ax}]")
-            for ax, comp in zip(("x", "y", "z"), eps_array)
+            _check_eps_one(comp, f"Epsilon[{ax}]") for ax, comp in zip(("x", "y", "z"), eps_array)
         )
     else:
         eps = _check_eps_one(eps_array, "Epsilon")

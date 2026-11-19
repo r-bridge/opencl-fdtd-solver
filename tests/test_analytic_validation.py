@@ -237,7 +237,11 @@ class TestPmlReflection(unittest.TestCase):
         )
         i_inc_p = int(np.argmax(np.abs(p_l_p)))
         r_p_db = 20.0 * np.log10(
-            max(float(np.max(np.abs((p_s_p - p_l_p)[i_inc_p + 20 :]))) / float(np.max(np.abs(p_l_p))), 1e-30)
+            max(
+                float(np.max(np.abs((p_s_p - p_l_p)[i_inc_p + 20 :])))
+                / float(np.max(np.abs(p_l_p))),
+                1e-30,
+            )
         )
         # -z face (mirror geometry)
         z_probe_ms = npml + 8
@@ -252,7 +256,11 @@ class TestPmlReflection(unittest.TestCase):
         )
         i_inc_m = int(np.argmax(np.abs(p_l_m)))
         r_m_db = 20.0 * np.log10(
-            max(float(np.max(np.abs((p_s_m - p_l_m)[i_inc_m + 20 :]))) / float(np.max(np.abs(p_l_m))), 1e-30)
+            max(
+                float(np.max(np.abs((p_s_m - p_l_m)[i_inc_m + 20 :])))
+                / float(np.max(np.abs(p_l_m))),
+                1e-30,
+            )
         )
         self.assertLess(r_p_db, -50.0, f"+z CPML reflection {r_p_db:.2f} dB; expected < -50 dB")
         self.assertLess(r_m_db, -50.0, f"-z CPML reflection {r_m_db:.2f} dB; expected < -50 dB")

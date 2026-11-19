@@ -6,7 +6,10 @@ Public surface of `opencl_fdtd_solver` (what `__all__` exports). Physics backgro
 
 ```python
 from opencl_fdtd_solver import (
-    C0, MU0, EPS0, ETA0,
+    C0,
+    MU0,
+    EPS0,
+    ETA0,
     OpenCLFDTD,
     NumPyFDTD,
     NumPyFDTD_FaceCPML,
@@ -109,8 +112,10 @@ from opencl_fdtd_solver import OpenCLFDTD
 sim = OpenCLFDTD((128, 128, 128), dl=1e-3, npml=12)  # or dtype=np.float64
 sim.set_epsilon(np.ones(sim.Nx * sim.Ny * sim.Nz).reshape(sim.Nx, sim.Ny, sim.Nz))
 
+
 def src(f):
     f.add_source_Jx(f.Nz // 2, np.sin(2 * np.pi * 5e9 * f.t), rim_taper=True)
+
 
 sim.add_source(src)
 sim.run(200)

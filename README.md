@@ -40,6 +40,7 @@ FP64 example (device must advertise OpenCL double support):
 ```python
 import numpy as np
 from opencl_fdtd_solver import OpenCLFDTD
+
 sim = OpenCLFDTD((200, 200, 200), 1e-3, npml=12, dtype=np.float64)
 ```
 
@@ -49,6 +50,7 @@ explicitly (the solver's default discovery does not read that variable):
 
 ```python
 import pyopencl as cl
+
 ctx = cl.create_some_context(interactive=False)
 sim = OpenCLFDTD((128, 128, 128), 1e-3, npml=12, ctx=ctx)
 ```

@@ -109,9 +109,7 @@ class OpenCLFDTD(SourceMonitorMixin):
     MEMORY_HEADROOM_FRACTION = 0.12
     MEMORY_HEADROOM_BYTES = 512 * 1024 * 1024
 
-    def __init__(
-        self, shape, dl, npml=20, dtype=np.float32, ctx=None, queue=None, accum_fp64=None
-    ):
+    def __init__(self, shape, dl, npml=20, dtype=np.float32, ctx=None, queue=None, accum_fp64=None):
         """
         shape : (Nx, Ny, Nz) Yee cells
         dl    : uniform cell size in metres
@@ -157,8 +155,8 @@ class OpenCLFDTD(SourceMonitorMixin):
             self.queue = queue
 
         if accum_fp64 is None:
-            self.accum_fp64 = (
-                dtype == np.dtype(np.float64) or self._device_supports_accum_fp64(self.device)
+            self.accum_fp64 = dtype == np.dtype(np.float64) or self._device_supports_accum_fp64(
+                self.device
             )
         else:
             self.accum_fp64 = bool(accum_fp64) or dtype == np.dtype(np.float64)

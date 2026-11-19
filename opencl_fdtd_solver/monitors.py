@@ -759,9 +759,9 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         angles = np.linspace(-180.0, 180.0, n, dtype=np.float64)
         rad = np.deg2rad(angles)
         cx, cy, cz = self._box_center_m
-        pts = np.column_stack(
-            [cx + R * np.sin(rad), np.full(n, cy), cz + R * np.cos(rad)]
-        ).astype(self._acc_dtype)
+        pts = np.column_stack([cx + R * np.sin(rad), np.full(n, cy), cz + R * np.cos(rad)]).astype(
+            self._acc_dtype
+        )
         eh = self.get_farfields(pts)
         db = np.empty(n, dtype=np.float64)
         for i in range(n):
