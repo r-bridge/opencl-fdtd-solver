@@ -29,3 +29,6 @@ benchmarks/last_meep_benchmark.txt
 .coverage.*
 coverage.xml
 htmlcov/
+
+# Local virtual environments
+.venv/

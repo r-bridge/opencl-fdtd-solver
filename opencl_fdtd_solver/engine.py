@@ -109,24 +109,22 @@ class OpenCLFDTD(SourceMonitorMixin):
     MEMORY_HEADROOM_FRACTION = 0.12
     MEMORY_HEADROOM_BYTES = 512 * 1024 * 1024
 
-    def __init__(
-        self, shape, dl, npml=20, dtype=np.float32, ctx=None, queue=None, accum_fp64=False
-    ):
+    def __init__(self, shape, dl, npml=20, dtype=np.float32, ctx=None, queue=None, accum_fp64=None):
         """
         shape : (Nx, Ny, Nz) Yee cells
         dl    : uniform cell size in metres
         npml  : PML thickness in cells
         dtype : ``np.float32`` (default) or ``np.float64`` (needs device FP64)
         ctx   : pre-existing OpenCL context (optional)
-        queue : pre-existing OpenCL command queue (optional)
+        queue : pre-existing OpenCL command queue (optional); selects the
+            device and provides the context when ``ctx`` is omitted
         accum_fp64 : monitor DFT / near-to-far accumulators use double precision
-            regardless of ``dtype`` (default False, matching legacy
-            single-precision-everywhere behavior; needs device FP64 when
-            enabled). These buffers are sized by monitor face-sample count,
-            not the volumetric grid, so the memory cost of turning this on
-            is negligible even when the main solver stays fp32 — opt in when
-            you want to rule out DFT/near-to-far accumulation round-off
-            without doubling the whole grid's memory footprint.
+            regardless of ``dtype``. Defaults to ``None``, which enables FP64
+            accumulation automatically when the device supports ``cl_khr_fp64``
+            (or ``cl_amd_fp64``) and ``cl_khr_int64_base_atomics``, and falls
+            back to ``False`` when those extensions are unavailable. With
+            FP32 fields, pass ``True`` to require FP64 accumulation or ``False``
+            to keep FP32 accumulation. FP64 fields always accumulate in FP64.
         """
         shape, self.dl, self.npml = validate_grid(shape, dl, npml)
         self.Nx, self.Ny, self.Nz = shape
@@ -138,11 +136,6 @@ class OpenCLFDTD(SourceMonitorMixin):
         self.complex_dtype = (
             np.dtype(np.complex64) if dtype == np.dtype(np.float32) else np.dtype(np.complex128)
         )
-        self.accum_fp64 = bool(accum_fp64) or dtype == np.dtype(np.float64)
-        self.accreal = np.float64 if self.accum_fp64 else self.real
-        self.accreal_complex_dtype = (
-            np.dtype(np.complex128) if self.accum_fp64 else self.complex_dtype
-        )
         self.t = 0.0
         self.step_num = 0
 
@@ -150,18 +143,27 @@ class OpenCLFDTD(SourceMonitorMixin):
         self.dt = COURANT_SAFETY_FACTOR * self.dl / (C0 * np.sqrt(3.0))
 
         # Setup OpenCL context and queue
-        if ctx is None:
-            self.ctx, shared_queue, self.device = _default_opencl_runtime()
-            if queue is None:
-                queue = shared_queue
-        else:
+        if queue is not None:
+            if ctx is not None and ctx != queue.context:
+                raise ValueError("OpenCL queue must belong to the supplied context")
+            self.ctx, self.queue, self.device = queue.context, queue, queue.device
+        elif ctx is not None:
             self.ctx = ctx
-            self.device = self.ctx.devices[0]
-
-        if queue is None:
-            self.queue = cl.CommandQueue(self.ctx)
+            self.queue = cl.CommandQueue(ctx)
+            self.device = self.queue.device
         else:
-            self.queue = queue
+            self.ctx, self.queue, self.device = _default_opencl_runtime()
+
+        if accum_fp64 is None:
+            self.accum_fp64 = dtype == np.dtype(np.float64) or self._device_supports_accum_fp64(
+                self.device
+            )
+        else:
+            self.accum_fp64 = bool(accum_fp64) or dtype == np.dtype(np.float64)
+        self.accreal = np.float64 if self.accum_fp64 else self.real
+        self.accreal_complex_dtype = (
+            np.dtype(np.complex128) if self.accum_fp64 else self.complex_dtype
+        )
 
         if self.dtype == np.dtype(np.float64) or self.accum_fp64:
             self._require_device_fp64(self.device)
@@ -223,8 +225,10 @@ class OpenCLFDTD(SourceMonitorMixin):
 
     def set_epsilon(self, eps_array, sigma_array=None, pec_mask=None):
         """
-        Set cell-centered ``εᵣ`` (and optionally conductivity ``σ`` [S/m]);
-        store Yee-edge lossy-update coefficients ``ca``, ``ce=cb`` on the GPU.
+        Set cell-centered ``εᵣ`` (isotropic 3-D array or diagonal anisotropic
+        3-tuple ``(eps_x, eps_y, eps_z)``) and optionally conductivity ``σ``
+        [S/m]; store Yee-edge lossy-update coefficients ``ca``, ``ce=cb`` on
+        the GPU.
 
         Materials are placed on the Yee E-edges by their owner cells: each
         edge takes the arithmetic mean of ``εᵣ`` (and ``σ``) over the cell
@@ -238,6 +242,13 @@ class OpenCLFDTD(SourceMonitorMixin):
         dielectric; the fixed vacuum-based timestep would leave the 3-D CFL
         limit below 0.9801 anyway). Conductivity must be finite and
         nonnegative.
+
+        A biaxial medium (three distinct components) must not reach the PML
+        normal to the axis of its intermediate component: the CPML amplifies
+        instead of absorbing there, so such input raises ``ValueError``.
+        Inside that PML make the normal component equal to one of the other
+        two (isotropic or uniaxial padding). Isotropic and uniaxial media,
+        and the other two PML directions, are unrestricted.
 
         ``sigma_array=None`` (default) is the old lossless path: ``ca=1``,
         ``ce = dt/(ε₀ εᵣ)`` exactly as before. Pass ``sigma_array`` (same
@@ -254,11 +265,15 @@ class OpenCLFDTD(SourceMonitorMixin):
         see ``materials.yee_edge_pec``.
         """
         expected = (self.Nx, self.Ny, self.Nz)
-        eps_array, sigma_array = validate_material_arrays(eps_array, sigma_array, expected)
-        if pec_mask is not None and pec_mask.shape != expected:
-            raise ValueError(
-                f"PEC mask shape mismatch: expected {expected}, got {tuple(pec_mask.shape)}"
-            )
+        eps_array, sigma_array = validate_material_arrays(
+            eps_array, sigma_array, expected, npml=self.npml
+        )
+        if pec_mask is not None:
+            pec_mask = np.asarray(pec_mask, dtype=bool)
+            if pec_mask.shape != expected:
+                raise ValueError(
+                    f"PEC mask shape mismatch: expected {expected}, got {tuple(pec_mask.shape)}"
+                )
         if sigma_array is None:
             ce_x, ce_y, ce_z = yee_edge_ce(eps_array, self.dt, dtype=self.dtype)
             cb_x, cb_y, cb_z = ce_x, ce_y, ce_z
@@ -400,8 +415,17 @@ class OpenCLFDTD(SourceMonitorMixin):
 
     @staticmethod
     def _device_supports_fp64(device) -> bool:
-        exts = device.extensions
+        exts = getattr(device, "extensions", "")
+        if not isinstance(exts, str):
+            return False
         return ("cl_khr_fp64" in exts) or ("cl_amd_fp64" in exts)
+
+    @classmethod
+    def _device_supports_accum_fp64(cls, device) -> bool:
+        exts = getattr(device, "extensions", "")
+        if not isinstance(exts, str):
+            return False
+        return cls._device_supports_fp64(device) and ("cl_khr_int64_base_atomics" in exts)
 
     @classmethod
     def _require_device_fp64(cls, device) -> None:
@@ -430,15 +454,15 @@ class OpenCLFDTD(SourceMonitorMixin):
         if self.dtype == np.dtype(np.float64):
             options.append("-DUSE_FP64=1")
         options.append(f"-DACCUM_FP64={1 if self.accum_fp64 else 0}")
-        self.program = cl.Program(self.ctx, kernel_src).build(options=options)
+        self.program = cl.Program(self.ctx, kernel_src).build(
+            options=options, devices=[self.device]
+        )
         self.kern_update_H_interior = cl.Kernel(self.program, "update_H_interior")
         self.kern_update_H_pml = cl.Kernel(self.program, "update_H_pml")
         self.kern_update_E_interior = cl.Kernel(self.program, "update_E_interior")
         self.kern_update_E_pml = cl.Kernel(self.program, "update_E_pml")
         self.kern_add_source_Ex = cl.Kernel(self.program, "add_source_Ex")
         self.kern_add_source_Jx = cl.Kernel(self.program, "add_source_Jx")
-        self.kern_accumulate_dft = cl.Kernel(self.program, "accumulate_dft")
-        self.kern_accumulate_dft_face = cl.Kernel(self.program, "accumulate_dft_face")
         self.kern_accumulate_dft_faces_fused = cl.Kernel(self.program, "accumulate_dft_faces_fused")
         self.kern_dft_rel_change_partial = cl.Kernel(self.program, "dft_rel_change_partial")
         self.kern_farfield_accumulate_nl = cl.Kernel(self.program, "farfield_accumulate_nl")

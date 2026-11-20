@@ -23,19 +23,38 @@ from .constants import C0, ETA0
 
 
 class Near2FarBase:
-    """Base class for Near-to-Far-Field monitors implementing the Huygens surface integration."""
+    """Base class for near-to-far monitors: Huygens box layout and host integration.
+
+    Tangential DFT samples are stored face-packed, one complex array per field
+    component, in the face order x0, x1, y0, y1, z0, z1. Within a face the
+    samples sit at the cell centres of that face, ordered ``(j, k)`` on x
+    faces, ``(i, k)`` on y faces and ``(i, j)`` on z faces (last index fastest).
+    """
 
     def __init__(self, fdtd, center, size, freq):
         self.fdtd = fdtd
+        freq = float(freq)
+        if not np.isfinite(freq) or freq <= 0.0:
+            raise ValueError(f"Monitor frequency must be finite and positive; got {freq!r}")
         self.freq = freq
         self.omega = 2.0 * np.pi * freq
         self.dl = fdtd.dl
 
-        cx, cy, cz = center
-        sx, sy, sz = size
+        cx, cy, cz = (float(v) for v in center)
+        sx, sy, sz = (float(v) for v in size)
+        if not all(np.isfinite(v) for v in (cx, cy, cz, sx, sy, sz)):
+            raise ValueError("Monitor center and size must contain finite numbers")
+        if sx <= 0.0 or sy <= 0.0 or sz <= 0.0:
+            raise ValueError("Monitor size must be positive along all three axes")
 
         def _idx(phys, dl):
-            return int(round(phys / dl))
+            # Nearest grid node, with a half-way position going to the higher
+            # node at both ends of the box: a box that spans a whole number of
+            # cells keeps that extent wherever its centre falls. (Python's
+            # round() sends halves to the even node, which made the extent
+            # depend on the parity of the centre index.) The 1e-9 absorbs
+            # floating-point error in phys / dl at a half-way position.
+            return int(np.floor(phys / dl + 0.5 + 1e-9))
 
         self.ix0 = max(0, _idx(cx - sx / 2, fdtd.dl))
         self.ix1 = min(fdtd.Nx - 1, _idx(cx + sx / 2, fdtd.dl))
@@ -43,6 +62,13 @@ class Near2FarBase:
         self.iy1 = min(fdtd.Ny - 1, _idx(cy + sy / 2, fdtd.dl))
         self.iz0 = max(0, _idx(cz - sz / 2, fdtd.dl))
         self.iz1 = min(fdtd.Nz - 1, _idx(cz + sz / 2, fdtd.dl))
+
+        if self.ix1 <= self.ix0 or self.iy1 <= self.iy0 or self.iz1 <= self.iz0:
+            raise ValueError(
+                f"Near2Far box is degenerate after clamping to grid "
+                f"({fdtd.Nx}, {fdtd.Ny}, {fdtd.Nz}): "
+                f"x=[{self.ix0}, {self.ix1}], y=[{self.iy0}, {self.iy1}], z=[{self.iz0}, {self.iz1}]"
+            )
 
         self._faces = [
             ("x", self.ix0, -1),
@@ -54,7 +80,35 @@ class Near2FarBase:
         ]
         self._box = (self.ix0, self.ix1, self.iy0, self.iy1, self.iz0, self.iz1)
 
-        # Placeholders for host DFT fields
+        # Packed face layout: x0,x1,y0,y1,z0,z1
+        self.nxf = self.ix1 - self.ix0
+        self.nyf = self.iy1 - self.iy0
+        self.nzf = self.iz1 - self.iz0
+        self._face_counts = (
+            self.nyf * self.nzf,
+            self.nyf * self.nzf,
+            self.nxf * self.nzf,
+            self.nxf * self.nzf,
+            self.nxf * self.nyf,
+            self.nxf * self.nyf,
+        )
+        offs = [0]
+        for c in self._face_counts[:-1]:
+            offs.append(offs[-1] + c)
+        self._face_offsets = tuple(offs)
+        self.n_face_samples = int(sum(self._face_counts))
+
+        # Host face-packed DFT, one array of n_face_samples per component.
+        # None until a subclass allocates or downloads them.
+        self.Ex_dft_f = None
+        self.Ey_dft_f = None
+        self.Ez_dft_f = None
+        self.Hx_dft_f = None
+        self.Hy_dft_f = None
+        self.Hz_dft_f = None
+
+        # Sparse host volumes for inspection; only
+        # OpenCLNear2FarMonitor.fetch_dft_fields fills them.
         self.Ex_dft = None
         self.Ey_dft = None
         self.Ez_dft = None
@@ -64,106 +118,65 @@ class Near2FarBase:
 
     def get_farfield(self, obs_point):
         """
-        Compute far-field (Ex, Ey, Ez, Hx, Hy, Hz) at observation point obs_point (metres).
-        Uses equivalent surface currents integrated over the Huygens box.
+        Far field (Ex, Ey, Ez, Hx, Hy, Hz) at ``obs_point`` (metres) on the host.
+
+        Integrates the equivalent surface currents of the host face-packed DFT
+        (``Ex_dft_f`` … ``Hz_dft_f``) with closed-box midpoint quadrature.
         """
-        if self.Ex_dft is None:
+        if self.Ex_dft_f is None:
             raise RuntimeError(
                 "DFT fields not initialized. Run the simulation and fetch results first."
             )
 
         dl = self.dl
         k = self.omega / C0
-        ox, oy, oz = obs_point
+        ox, oy, oz = (float(v) for v in obs_point)
         r = np.sqrt(ox**2 + oy**2 + oz**2)
-        rx, ry, rz = ox / r, oy / r, oz / r
-
-        Nx_int = Ny_int = Nz_int = 0j
-        Lx_int = Ly_int = Lz_int = 0j
-
+        rhat = np.array([ox / r, oy / r, oz / r])
         ix0, ix1, iy0, iy1, iz0, iz1 = self._box
 
-        for face_axis, face_idx, normal_sign in self._faces:
-            n = normal_sign
-            dA = dl * dl
+        # exp(-j k rhat.r') factorises per axis: cell centres along the two
+        # in-face axes, the face plane along the normal.
+        centre_phase = (
+            np.exp(-1j * k * rhat[0] * (np.arange(ix0, ix1) + 0.5) * dl),
+            np.exp(-1j * k * rhat[1] * (np.arange(iy0, iy1) + 0.5) * dl),
+            np.exp(-1j * k * rhat[2] * (np.arange(iz0, iz1) + 0.5) * dl),
+        )
+        fields = {
+            "Ex": self.Ex_dft_f,
+            "Ey": self.Ey_dft_f,
+            "Ez": self.Ez_dft_f,
+            "Hx": self.Hx_dft_f,
+            "Hy": self.Hy_dft_f,
+            "Hz": self.Hz_dft_f,
+        }
+        # N integrates H x n and L integrates n x E (PHYSICS.md §8). Per face
+        # axis, for the outward normal +axis: (vector component, H field, sign)
+        # of H x n. n x E = -(E x n), so each L term is the same entry with
+        # H replaced by E and the sign reversed.
+        h_cross_n = {
+            "x": ((1, "Hz", +1), (2, "Hy", -1)),
+            "y": ((0, "Hz", -1), (2, "Hx", +1)),
+            "z": ((0, "Hy", +1), (1, "Hx", -1)),
+        }
 
-            if face_axis == "x":
-                i = face_idx
-                js = np.arange(iy0, iy1 + 1)
-                ks = np.arange(iz0, iz1 + 1)
-                jg, kg = np.meshgrid(js, ks, indexing="ij")
-                w = np.ones_like(jg, dtype=np.float64)
-                w[(jg == iy0) | (jg == iy1)] *= 0.5
-                w[(kg == iz0) | (kg == iz1)] *= 0.5
-
-                xp = i * dl
-                yp = (jg + 0.5) * dl
-                zp = (kg + 0.5) * dl
-                phase_factor = np.exp(-1j * k * (rx * xp + ry * yp + rz * zp))
-
-                J_y = n * self.Hz_dft[i, iy0 : iy1 + 1, iz0 : iz1 + 1]
-                J_z = -n * self.Hy_dft[i, iy0 : iy1 + 1, iz0 : iz1 + 1]
-                M_y = -n * self.Ez_dft[i, iy0 : iy1 + 1, iz0 : iz1 + 1]
-                M_z = n * self.Ey_dft[i, iy0 : iy1 + 1, iz0 : iz1 + 1]
-
-                Ny_int += np.sum(J_y * phase_factor * w) * dA
-                Nz_int += np.sum(J_z * phase_factor * w) * dA
-                Ly_int += np.sum(M_y * phase_factor * w) * dA
-                Lz_int += np.sum(M_z * phase_factor * w) * dA
-
-            elif face_axis == "y":
-                j = face_idx
-                is_ = np.arange(ix0, ix1 + 1)
-                ks = np.arange(iz0, iz1 + 1)
-                ig, kg = np.meshgrid(is_, ks, indexing="ij")
-                w = np.ones_like(ig, dtype=np.float64)
-                w[(ig == ix0) | (ig == ix1)] *= 0.5
-                w[(kg == iz0) | (kg == iz1)] *= 0.5
-
-                xp = (ig + 0.5) * dl
-                yp = j * dl
-                zp = (kg + 0.5) * dl
-                phase_factor = np.exp(-1j * k * (rx * xp + ry * yp + rz * zp))
-
-                J_x = -n * self.Hz_dft[ix0 : ix1 + 1, j, iz0 : iz1 + 1]
-                J_z = n * self.Hx_dft[ix0 : ix1 + 1, j, iz0 : iz1 + 1]
-                M_x = n * self.Ez_dft[ix0 : ix1 + 1, j, iz0 : iz1 + 1]
-                M_z = -n * self.Ex_dft[ix0 : ix1 + 1, j, iz0 : iz1 + 1]
-
-                Nx_int += np.sum(J_x * phase_factor * w) * dA
-                Nz_int += np.sum(J_z * phase_factor * w) * dA
-                Lx_int += np.sum(M_x * phase_factor * w) * dA
-                Lz_int += np.sum(M_z * phase_factor * w) * dA
-
-            else:  # face_axis == 'z'
-                kk = face_idx
-                is_ = np.arange(ix0, ix1 + 1)
-                js = np.arange(iy0, iy1 + 1)
-                ig, jg = np.meshgrid(is_, js, indexing="ij")
-                w = np.ones_like(ig, dtype=np.float64)
-                w[(ig == ix0) | (ig == ix1)] *= 0.5
-                w[(jg == iy0) | (jg == iy1)] *= 0.5
-
-                xp = (ig + 0.5) * dl
-                yp = (jg + 0.5) * dl
-                zp = kk * dl
-                phase_factor = np.exp(-1j * k * (rx * xp + ry * yp + rz * zp))
-
-                J_x = n * self.Hy_dft[ix0 : ix1 + 1, iy0 : iy1 + 1, kk]
-                J_y = -n * self.Hx_dft[ix0 : ix1 + 1, iy0 : iy1 + 1, kk]
-                M_x = -n * self.Ey_dft[ix0 : ix1 + 1, iy0 : iy1 + 1, kk]
-                M_y = n * self.Ex_dft[ix0 : ix1 + 1, iy0 : iy1 + 1, kk]
-
-                Nx_int += np.sum(J_x * phase_factor * w) * dA
-                Ny_int += np.sum(J_y * phase_factor * w) * dA
-                Lx_int += np.sum(M_x * phase_factor * w) * dA
-                Ly_int += np.sum(M_y * phase_factor * w) * dA
+        N = np.zeros(3, dtype=np.complex128)
+        L = np.zeros(3, dtype=np.complex128)
+        for face_id, (face_axis, face_idx, normal_sign) in enumerate(self._faces):
+            axis = "xyz".index(face_axis)
+            u, v = (a for a in range(3) if a != axis)
+            plane_phase = np.exp(-1j * k * rhat[axis] * face_idx * dl)
+            phase = (plane_phase * np.outer(centre_phase[u], centre_phase[v])).ravel()
+            start = self._face_offsets[face_id]
+            sl = slice(start, start + self._face_counts[face_id])
+            for comp, h_name, sign in h_cross_n[face_axis]:
+                e_name = "E" + h_name[1]
+                N[comp] += normal_sign * sign * np.sum(fields[h_name][sl] * phase)
+                L[comp] -= normal_sign * sign * np.sum(fields[e_name][sl] * phase)
+        N *= dl * dl
+        L *= dl * dl
 
         prefactor = -1j * k / (4.0 * np.pi * r) * np.exp(1j * k * r)
-        N = np.array([Nx_int, Ny_int, Nz_int])
-        L = np.array([Lx_int, Ly_int, Lz_int])
-        rhat = np.array([rx, ry, rz])
-
         rxL = np.cross(rhat, L)
         N_t = N - np.dot(rhat, N) * rhat
 
@@ -187,27 +200,12 @@ class NumPyNear2FarMonitor(Near2FarBase):
     Near-to-far monitor with face-packed DFT on the host.
 
     Matches the OpenCL layout: co-located tangential samples, H half-step
-    phase, and trapezoidal edge/corner quadrature in :meth:`get_farfield`.
+    phase, and closed-box midpoint quadrature in :meth:`get_farfield`
+    (inherited from :class:`Near2FarBase`).
     """
 
     def __init__(self, fdtd, center, size, freq):
         super().__init__(fdtd, center, size, freq)
-        self.nxf = self.ix1 - self.ix0 + 1
-        self.nyf = self.iy1 - self.iy0 + 1
-        self.nzf = self.iz1 - self.iz0 + 1
-        self._face_counts = (
-            self.nyf * self.nzf,
-            self.nyf * self.nzf,
-            self.nxf * self.nzf,
-            self.nxf * self.nzf,
-            self.nxf * self.nyf,
-            self.nxf * self.nyf,
-        )
-        offs = [0]
-        for c in self._face_counts[:-1]:
-            offs.append(offs[-1] + c)
-        self._face_offsets = tuple(offs)
-        self.n_face_samples = int(sum(self._face_counts))
         complex_dtype = getattr(
             fdtd, "accreal_complex_dtype", np.result_type(fdtd.dtype, np.complex64)
         )
@@ -218,14 +216,6 @@ class NumPyNear2FarMonitor(Near2FarBase):
         self.Hx_dft_f = z.copy()
         self.Hy_dft_f = z.copy()
         self.Hz_dft_f = z.copy()
-        # Volume placeholders so Near2FarBase.Ex_dft is non-None after a run.
-        shape = (fdtd.Nx, fdtd.Ny, fdtd.Nz)
-        self.Ex_dft = np.zeros(shape, dtype=complex_dtype)
-        self.Ey_dft = np.zeros(shape, dtype=complex_dtype)
-        self.Ez_dft = np.zeros(shape, dtype=complex_dtype)
-        self.Hx_dft = np.zeros(shape, dtype=complex_dtype)
-        self.Hy_dft = np.zeros(shape, dtype=complex_dtype)
-        self.Hz_dft = np.zeros(shape, dtype=complex_dtype)
         fdtd.add_monitor(self)
 
     def __call__(self, fdtd):
@@ -288,98 +278,13 @@ class NumPyNear2FarMonitor(Near2FarBase):
                 self.Hx_dft_f[fi] += (
                     phase_h
                     * 0.25
-                    * (Hx[i, j, kk] + Hx[i, j, k_lo] + Hx[i, j1, kk] + Hx[i, j1, k_lo])
+                    * (Hx[i, j, kk] + Hx[i, j, k_lo] + Hx[i1, j, kk] + Hx[i1, j, k_lo])
                 )
                 self.Hy_dft_f[fi] += (
                     phase_h
                     * 0.25
-                    * (Hy[i, j, kk] + Hy[i, j, k_lo] + Hy[i1, j, kk] + Hy[i1, j, k_lo])
+                    * (Hy[i, j, kk] + Hy[i, j, k_lo] + Hy[i, j1, kk] + Hy[i, j1, k_lo])
                 )
-
-    def get_farfield(self, obs_point):
-        """Far-field from face-packed DFT with trapezoidal face weights."""
-        dl = self.dl
-        k = self.omega / C0
-        ox, oy, oz = obs_point
-        r = np.sqrt(ox**2 + oy**2 + oz**2)
-        rx, ry, rz = ox / r, oy / r, oz / r
-        ix0, ix1, iy0, iy1, iz0, iz1 = self._box
-        o0, o1, o2, o3, o4, o5 = self._face_offsets
-        nxf, nyf, nzf = self.nxf, self.nyf, self.nzf
-        dA = dl * dl
-        Nx_int = Ny_int = Nz_int = 0j
-        Lx_int = Ly_int = Lz_int = 0j
-
-        def _acc_x(i, off, nf):
-            nonlocal Ny_int, Nz_int, Ly_int, Lz_int
-            for loc in range(nyf * nzf):
-                j = iy0 + loc // nzf
-                kk = iz0 + (loc % nzf)
-                w = 1.0
-                if j == iy0 or j == iy1:
-                    w *= 0.5
-                if kk == iz0 or kk == iz1:
-                    w *= 0.5
-                xp, yp, zp = i * dl, (j + 0.5) * dl, (kk + 0.5) * dl
-                ph = np.exp(-1j * k * (rx * xp + ry * yp + rz * zp))
-                fi = off + loc
-                Ny_int += nf * self.Hz_dft_f[fi] * ph * dA * w
-                Nz_int += -nf * self.Hy_dft_f[fi] * ph * dA * w
-                Ly_int += -nf * self.Ez_dft_f[fi] * ph * dA * w
-                Lz_int += nf * self.Ey_dft_f[fi] * ph * dA * w
-
-        def _acc_y(j, off, nf):
-            nonlocal Nx_int, Nz_int, Lx_int, Lz_int
-            for loc in range(nxf * nzf):
-                i = ix0 + loc // nzf
-                kk = iz0 + (loc % nzf)
-                w = 1.0
-                if i == ix0 or i == ix1:
-                    w *= 0.5
-                if kk == iz0 or kk == iz1:
-                    w *= 0.5
-                xp, yp, zp = (i + 0.5) * dl, j * dl, (kk + 0.5) * dl
-                ph = np.exp(-1j * k * (rx * xp + ry * yp + rz * zp))
-                fi = off + loc
-                Nx_int += -nf * self.Hz_dft_f[fi] * ph * dA * w
-                Nz_int += nf * self.Hx_dft_f[fi] * ph * dA * w
-                Lx_int += nf * self.Ez_dft_f[fi] * ph * dA * w
-                Lz_int += -nf * self.Ex_dft_f[fi] * ph * dA * w
-
-        def _acc_z(kk, off, nf):
-            nonlocal Nx_int, Ny_int, Lx_int, Ly_int
-            for loc in range(nxf * nyf):
-                i = ix0 + loc // nyf
-                j = iy0 + (loc % nyf)
-                w = 1.0
-                if i == ix0 or i == ix1:
-                    w *= 0.5
-                if j == iy0 or j == iy1:
-                    w *= 0.5
-                xp, yp, zp = (i + 0.5) * dl, (j + 0.5) * dl, kk * dl
-                ph = np.exp(-1j * k * (rx * xp + ry * yp + rz * zp))
-                fi = off + loc
-                Nx_int += nf * self.Hy_dft_f[fi] * ph * dA * w
-                Ny_int += -nf * self.Hx_dft_f[fi] * ph * dA * w
-                Lx_int += -nf * self.Ey_dft_f[fi] * ph * dA * w
-                Ly_int += nf * self.Ex_dft_f[fi] * ph * dA * w
-
-        _acc_x(ix0, o0, -1.0)
-        _acc_x(ix1, o1, +1.0)
-        _acc_y(iy0, o2, -1.0)
-        _acc_y(iy1, o3, +1.0)
-        _acc_z(iz0, o4, -1.0)
-        _acc_z(iz1, o5, +1.0)
-
-        prefactor = -1j * k / (4.0 * np.pi * r) * np.exp(1j * k * r)
-        N = np.array([Nx_int, Ny_int, Nz_int])
-        L = np.array([Lx_int, Ly_int, Lz_int])
-        rhat = np.array([rx, ry, rz])
-        rxL = np.cross(rhat, L)
-        N_t = N - np.dot(rhat, N) * rhat
-        E_far = prefactor * (ETA0 * N_t - rxL)
-        H_far = np.cross(rhat, E_far) / ETA0
-        return np.array([E_far[0], E_far[1], E_far[2], H_far[0], H_far[1], H_far[2]])
 
 
 class OpenCLNear2FarMonitor(Near2FarBase):
@@ -388,30 +293,13 @@ class OpenCLNear2FarMonitor(Near2FarBase):
 
     - Per-step accumulation writes only the 6 Huygens faces (not the full volume).
     - ``get_farfield`` / ``get_farfields`` run the surface integral on OpenCL.
-    - ``fetch_dft_fields`` downloads face packs only and scatters into sparse
-      host volumes for debugging / NumPy-path comparison.
+    - ``fetch_dft_fields`` downloads the face packs for the host integral
+      (``Near2FarBase.get_farfield``) and scatters them into sparse host
+      volumes for inspection.
     """
 
     def __init__(self, fdtd, center, size, freq):
         super().__init__(fdtd, center, size, freq)
-
-        self.nxf = self.ix1 - self.ix0 + 1
-        self.nyf = self.iy1 - self.iy0 + 1
-        self.nzf = self.iz1 - self.iz0 + 1
-        # Packed face layout: x0,x1,y0,y1,z0,z1
-        self._face_counts = (
-            self.nyf * self.nzf,
-            self.nyf * self.nzf,
-            self.nxf * self.nzf,
-            self.nxf * self.nzf,
-            self.nxf * self.nyf,
-            self.nxf * self.nyf,
-        )
-        offs = [0]
-        for c in self._face_counts[:-1]:
-            offs.append(offs[-1] + c)
-        self._face_offsets = tuple(offs)
-        self.n_face_samples = int(sum(self._face_counts))
 
         self._real = fdtd.real
         self._dtype = fdtd.dtype
@@ -455,9 +343,7 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         self._dft_rel_partial_den = None
         self._dft_rel_n_groups = 0
 
-        # Phase recurrence: phase_e_{n+1} = phase_e_n * exp(j ω Δt).
         # H is half a step behind E at monitor time → phase_h = phase_e * exp(-j ω Δt/2).
-        self._dphase = np.exp(1j * self.omega * float(fdtd.dt))
         self._h_half_step = np.exp(-0.5j * self.omega * float(fdtd.dt))
         self._phase = None
         self._offs_i32 = tuple(np.int32(o) for o in self._face_offsets)
@@ -515,8 +401,13 @@ class OpenCLNear2FarMonitor(Near2FarBase):
             return 1.0
         fdtd = self.fdtd
         n = int(self.n_face_samples)
+        dev = fdtd.device
+        wg_cap = int(getattr(dev, "max_work_group_size", 256) or 256)
+        local_mem = int(getattr(dev, "local_mem_size", 32768) or 32768)
         lsize = 256
-        while lsize > 1 and lsize > n:
+        while lsize > 1 and (
+            lsize > wg_cap or lsize > n or 2 * lsize * self._acc_itemsize > local_mem
+        ):
             lsize //= 2
         lsize = max(1, lsize)
         n_groups = (n + lsize - 1) // lsize
@@ -571,15 +462,12 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         return float(np.sqrt(max(num, 0.0) / den))
 
     def __call__(self, fdtd):
-        if self._phase is None:
-            self._phase = np.exp(1j * self.omega * fdtd.t) * fdtd.dt
-        else:
-            self._phase *= self._dphase
-
+        # Evaluate the phase from fdtd.t at every step: a running product
+        # phase *= exp(j ω Δt) would accumulate rounding over long runs.
+        self._phase = np.exp(1j * self.omega * float(fdtd.t)) * float(fdtd.dt)
         phase_h = self._phase * self._h_half_step
-        # Phase recurrence itself is already double (numpy default complex128,
-        # see self._dphase); cast to the accumulator's precision, not the
-        # volumetric field's, so we don't reintroduce fp32 rounding here.
+        # The phase is complex128 on the host; cast it to the accumulator's
+        # precision, not the volumetric field's, so no fp32 rounding enters here.
         pr_e = self._acc(self._phase.real)
         pi_e = self._acc(self._phase.imag)
         pr_h = self._acc(phase_h.real)
@@ -630,7 +518,9 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         fdtd = self.fdtd
         if self._obs_buf is None or n_obs > self._obs_cap:
             self._obs_cap = max(n_obs, 64)
-            self._obs_buf = cl.Buffer(fdtd.ctx, mf.READ_ONLY, self._obs_cap * 3 * self._itemsize)
+            self._obs_buf = cl.Buffer(
+                fdtd.ctx, mf.READ_ONLY, self._obs_cap * 3 * self._acc_itemsize
+            )
         if self._eh_buf is None or n_obs > self._eh_cap:
             self._eh_cap = max(n_obs, 64)
             # 6 accreal2 per observation (E,H) — N/L reduction + final EH
@@ -652,30 +542,39 @@ class OpenCLNear2FarMonitor(Near2FarBase):
 
         Returns shape ``(n_obs, 6)`` complex (Ex,Ey,Ez,Hx,Hy,Hz).
         """
-        pts = np.asarray(obs_points, dtype=self._dtype)
-        if pts.ndim == 1:
-            pts = pts.reshape(1, 3)
-        if pts.shape[1] != 3:
+        pts = np.asarray(obs_points, dtype=self._acc_dtype)
+        if pts.ndim == 1 and pts.size in (0, 3):
+            # One point, or an empty list of points.
+            pts = pts.reshape(-1, 3)
+        if pts.ndim != 2 or pts.shape[1] != 3:
             raise ValueError("obs_points must be (n,3) or (3,)")
         n_obs = int(pts.shape[0])
+        if n_obs == 0:
+            return np.empty((0, 6), dtype=np.complex128)
         n_face = int(self.n_face_samples)
         self._ensure_obs_bufs(n_obs)
         fdtd = self.fdtd
-        flat = np.ascontiguousarray(pts.reshape(-1), dtype=self._dtype)
+        flat = np.ascontiguousarray(pts.reshape(-1), dtype=self._acc_dtype)
         cl.enqueue_copy(fdtd.queue, self._obs_buf, flat)
 
         # Zero N,L accumulators (accreal precision)
         zeros = np.zeros(n_obs * 6 * 2, dtype=self._acc_dtype)
         cl.enqueue_copy(fdtd.queue, self._nl_buf, zeros)
 
-        k_wave = self._real(self.omega / C0)
-        dl = self._real(self.dl)
-        eta0 = self._real(ETA0)
+        k_wave = self._acc(self.omega / C0)
+        dl = self._acc(self.dl)
+        eta0 = self._acc(ETA0)
         offs = [np.int32(o) for o in self._face_offsets]
 
-        # Prefer 256 threads along the face axis (power-of-two local reduce).
+        # Prefer 256 threads along the face axis, bounded by device work-group
+        # and local memory limits (6 * lsize * sizeof(accreal2)).
+        dev = fdtd.device
+        wg_cap = int(getattr(dev, "max_work_group_size", 256) or 256)
+        local_mem = int(getattr(dev, "local_mem_size", 32768) or 32768)
         lsize0 = 256
-        while lsize0 > 1 and lsize0 > n_face:
+        while lsize0 > 1 and (
+            lsize0 > wg_cap or lsize0 > n_face or 6 * lsize0 * 2 * self._acc_itemsize > local_mem
+        ):
             lsize0 //= 2
         lsize0 = max(1, lsize0)
         g0 = ((n_face + lsize0 - 1) // lsize0) * lsize0
@@ -749,8 +648,11 @@ class OpenCLNear2FarMonitor(Near2FarBase):
         n = max(3, int(n_angles))
         angles = np.linspace(-180.0, 180.0, n, dtype=np.float64)
         rad = np.deg2rad(angles)
-        pts = np.column_stack([R * np.sin(rad), np.zeros(n), R * np.cos(rad)]).astype(self._dtype)
-        eh = self.get_farfields(pts)
+        # The solver derives direction and range from these displacements.
+        # Translating the surface coordinates would only add a common phase
+        # to E and H, which cancels in the Poynting magnitude.
+        displacements = np.column_stack([R * np.sin(rad), np.zeros(n), R * np.cos(rad)])
+        eh = self.get_farfields(displacements)
         db = np.empty(n, dtype=np.float64)
         for i in range(n):
             db[i], _ = _poynting_db(eh[i])
@@ -758,8 +660,19 @@ class OpenCLNear2FarMonitor(Near2FarBase):
 
     def fetch_dft_fields(self):
         """
-        Download face-packed DFT (~surface only) and scatter into sparse
-        host volumes for debugging. Prefer ``get_farfield`` (GPU) instead.
+        Download the face-packed DFT (surface samples only) to the host.
+
+        Returns the six face-packed complex arrays keyed by component and
+        keeps them as ``Ex_dft_f`` … ``Hz_dft_f``, which
+        ``Near2FarBase.get_farfield`` integrates on the host. Prefer
+        ``get_farfield`` (GPU) for results.
+
+        For inspection each component is also scattered into a sparse host
+        volume ``Ex_dft`` … ``Hz_dft``, indexed by the cell of each face
+        sample, from the four faces on which it is tangential. The volumes
+        are not a complete copy: along the three box edges through the low
+        corner two faces share a cell index, and the volume keeps the sample
+        of the face written last (x faces, then y, then z).
         """
         shape = (self.fdtd.Nx, self.fdtd.Ny, self.fdtd.Nz)
 
@@ -777,32 +690,40 @@ class OpenCLNear2FarMonitor(Near2FarBase):
             "Hy": _fetch_faces(self.Hy_dft_buf),
             "Hz": _fetch_faces(self.Hz_dft_buf),
         }
+        self.Ex_dft_f = faces["Ex"]
+        self.Ey_dft_f = faces["Ey"]
+        self.Ez_dft_f = faces["Ez"]
+        self.Hx_dft_f = faces["Hx"]
+        self.Hy_dft_f = faces["Hy"]
+        self.Hz_dft_f = faces["Hz"]
 
-        def _scatter(face_arr):
+        def _scatter(face_arr, axes: tuple[str, ...]):
             vol = np.zeros(shape, dtype=self._acc_complex_dtype)
-            # x faces
-            for face_id, ii in ((0, self.ix0), (1, self.ix1)):
-                base = self._face_offsets[face_id]
-                chunk = face_arr[base : base + self.nyf * self.nzf].reshape(self.nyf, self.nzf)
-                vol[ii, self.iy0 : self.iy1 + 1, self.iz0 : self.iz1 + 1] = chunk
-            # y faces
-            for face_id, jj in ((2, self.iy0), (3, self.iy1)):
-                base = self._face_offsets[face_id]
-                chunk = face_arr[base : base + self.nxf * self.nzf].reshape(self.nxf, self.nzf)
-                vol[self.ix0 : self.ix1 + 1, jj, self.iz0 : self.iz1 + 1] = chunk
-            # z faces
-            for face_id, kk in ((4, self.iz0), (5, self.iz1)):
-                base = self._face_offsets[face_id]
-                chunk = face_arr[base : base + self.nxf * self.nyf].reshape(self.nxf, self.nyf)
-                vol[self.ix0 : self.ix1 + 1, self.iy0 : self.iy1 + 1, kk] = chunk
+            if "x" in axes:
+                for face_id, ii in ((0, self.ix0), (1, self.ix1)):
+                    base = self._face_offsets[face_id]
+                    chunk = face_arr[base : base + self.nyf * self.nzf].reshape(self.nyf, self.nzf)
+                    vol[ii, self.iy0 : self.iy1, self.iz0 : self.iz1] = chunk
+            if "y" in axes:
+                for face_id, jj in ((2, self.iy0), (3, self.iy1)):
+                    base = self._face_offsets[face_id]
+                    chunk = face_arr[base : base + self.nxf * self.nzf].reshape(self.nxf, self.nzf)
+                    vol[self.ix0 : self.ix1, jj, self.iz0 : self.iz1] = chunk
+            if "z" in axes:
+                for face_id, kk in ((4, self.iz0), (5, self.iz1)):
+                    base = self._face_offsets[face_id]
+                    chunk = face_arr[base : base + self.nxf * self.nyf].reshape(self.nxf, self.nyf)
+                    vol[self.ix0 : self.ix1, self.iy0 : self.iy1, kk] = chunk
             return vol
 
-        self.Ex_dft = _scatter(faces["Ex"])
-        self.Ey_dft = _scatter(faces["Ey"])
-        self.Ez_dft = _scatter(faces["Ez"])
-        self.Hx_dft = _scatter(faces["Hx"])
-        self.Hy_dft = _scatter(faces["Hy"])
-        self.Hz_dft = _scatter(faces["Hz"])
+        # Only scatter each field component from the 4 faces on which it is
+        # tangential, preventing normal-face zeros from clobbering shared edges.
+        self.Ex_dft = _scatter(faces["Ex"], ("y", "z"))
+        self.Ey_dft = _scatter(faces["Ey"], ("x", "z"))
+        self.Ez_dft = _scatter(faces["Ez"], ("x", "y"))
+        self.Hx_dft = _scatter(faces["Hx"], ("y", "z"))
+        self.Hy_dft = _scatter(faces["Hy"], ("x", "z"))
+        self.Hz_dft = _scatter(faces["Hz"], ("x", "y"))
         return faces
 
 

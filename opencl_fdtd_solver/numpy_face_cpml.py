@@ -149,8 +149,10 @@ class NumPyFDTD_FaceCPML(NumPyFDTD):
             cx = self._cx_h[i_sl].reshape(-1, 1, 1)
             self._psi_Hy_x[s_sl, :, :] = bx * self._psi_Hy_x[s_sl, :, :] + cx * dEz_dx[i_sl, :, :]
             self._psi_Hz_x[s_sl, :, :] = bx * self._psi_Hz_x[s_sl, :, :] + cx * dEy_dx[i_sl, :, :]
-            self.Hy[i_sl, :, :] -= dtm * (-self._psi_Hy_x[s_sl, :, :])
-            self.Hz[i_sl, :, :] -= dtm * self._psi_Hz_x[s_sl, :, :]
+            self.Hy[i_sl, :, :] -= (dtm * (-self._psi_Hy_x[s_sl, :, :])).astype(
+                self.dtype, copy=False
+            )
+            self.Hz[i_sl, :, :] -= (dtm * self._psi_Hz_x[s_sl, :, :]).astype(self.dtype, copy=False)
 
         # y-normal faces → ψ_Hx_y, ψ_Hz_y
         for j_sl, s_sl in self._face_slices(self.Ny, npml):
@@ -158,8 +160,10 @@ class NumPyFDTD_FaceCPML(NumPyFDTD):
             cy = self._cy_h[j_sl].reshape(1, -1, 1)
             self._psi_Hx_y[:, s_sl, :] = by * self._psi_Hx_y[:, s_sl, :] + cy * dEz_dy[:, j_sl, :]
             self._psi_Hz_y[:, s_sl, :] = by * self._psi_Hz_y[:, s_sl, :] + cy * dEx_dy[:, j_sl, :]
-            self.Hx[:, j_sl, :] -= dtm * self._psi_Hx_y[:, s_sl, :]
-            self.Hz[:, j_sl, :] -= dtm * (-self._psi_Hz_y[:, s_sl, :])
+            self.Hx[:, j_sl, :] -= (dtm * self._psi_Hx_y[:, s_sl, :]).astype(self.dtype, copy=False)
+            self.Hz[:, j_sl, :] -= (dtm * (-self._psi_Hz_y[:, s_sl, :])).astype(
+                self.dtype, copy=False
+            )
 
         # z-normal faces → ψ_Hx_z, ψ_Hy_z
         for k_sl, s_sl in self._face_slices(self.Nz, npml):
@@ -167,8 +171,10 @@ class NumPyFDTD_FaceCPML(NumPyFDTD):
             cz = self._cz_h[k_sl].reshape(1, 1, -1)
             self._psi_Hx_z[:, :, s_sl] = bz * self._psi_Hx_z[:, :, s_sl] + cz * dEy_dz[:, :, k_sl]
             self._psi_Hy_z[:, :, s_sl] = bz * self._psi_Hy_z[:, :, s_sl] + cz * dEx_dz[:, :, k_sl]
-            self.Hx[:, :, k_sl] -= dtm * (-self._psi_Hx_z[:, :, s_sl])
-            self.Hy[:, :, k_sl] -= dtm * self._psi_Hy_z[:, :, s_sl]
+            self.Hx[:, :, k_sl] -= (dtm * (-self._psi_Hx_z[:, :, s_sl])).astype(
+                self.dtype, copy=False
+            )
+            self.Hy[:, :, k_sl] -= (dtm * self._psi_Hy_z[:, :, s_sl]).astype(self.dtype, copy=False)
 
     def _update_E(self):
         dl = self.dl
@@ -182,6 +188,10 @@ class NumPyFDTD_FaceCPML(NumPyFDTD):
         dHy_dx = self._bwd(Hy, 0)
         dHx_dy = self._bwd(Hx, 1)
 
+        if self._ca_x is not None:
+            self.Ex *= self._ca_x
+            self.Ey *= self._ca_y
+            self.Ez *= self._ca_z
         self.Ex += self._ce_x * (dHz_dy / (self._ky_e_b * dl) - dHy_dz / (self._kz_e_b * dl))
         self.Ey += self._ce_y * (dHx_dz / (self._kz_e_b * dl) - dHz_dx / (self._kx_e_b * dl))
         self.Ez += self._ce_z * (dHy_dx / (self._kx_e_b * dl) - dHx_dy / (self._ky_e_b * dl))
@@ -196,8 +206,12 @@ class NumPyFDTD_FaceCPML(NumPyFDTD):
             cx = self._cx_e[i_sl].reshape(-1, 1, 1)
             self._psi_Ey_x[s_sl, :, :] = bx * self._psi_Ey_x[s_sl, :, :] + cx * dHz_dx[i_sl, :, :]
             self._psi_Ez_x[s_sl, :, :] = bx * self._psi_Ez_x[s_sl, :, :] + cx * dHy_dx[i_sl, :, :]
-            self.Ey[i_sl, :, :] += self._ce_y[i_sl, :, :] * (-self._psi_Ey_x[s_sl, :, :])
-            self.Ez[i_sl, :, :] += self._ce_z[i_sl, :, :] * self._psi_Ez_x[s_sl, :, :]
+            self.Ey[i_sl, :, :] += (self._ce_y[i_sl, :, :] * (-self._psi_Ey_x[s_sl, :, :])).astype(
+                self.dtype, copy=False
+            )
+            self.Ez[i_sl, :, :] += (self._ce_z[i_sl, :, :] * self._psi_Ez_x[s_sl, :, :]).astype(
+                self.dtype, copy=False
+            )
 
         # y-normal → ψ_Ex_y, ψ_Ez_y
         for j_sl, s_sl in self._face_slices(self.Ny, npml):
@@ -205,8 +219,12 @@ class NumPyFDTD_FaceCPML(NumPyFDTD):
             cy = self._cy_e[j_sl].reshape(1, -1, 1)
             self._psi_Ex_y[:, s_sl, :] = by * self._psi_Ex_y[:, s_sl, :] + cy * dHz_dy[:, j_sl, :]
             self._psi_Ez_y[:, s_sl, :] = by * self._psi_Ez_y[:, s_sl, :] + cy * dHx_dy[:, j_sl, :]
-            self.Ex[:, j_sl, :] += self._ce_x[:, j_sl, :] * self._psi_Ex_y[:, s_sl, :]
-            self.Ez[:, j_sl, :] += self._ce_z[:, j_sl, :] * (-self._psi_Ez_y[:, s_sl, :])
+            self.Ex[:, j_sl, :] += (self._ce_x[:, j_sl, :] * self._psi_Ex_y[:, s_sl, :]).astype(
+                self.dtype, copy=False
+            )
+            self.Ez[:, j_sl, :] += (self._ce_z[:, j_sl, :] * (-self._psi_Ez_y[:, s_sl, :])).astype(
+                self.dtype, copy=False
+            )
 
         # z-normal → ψ_Ex_z, ψ_Ey_z
         for k_sl, s_sl in self._face_slices(self.Nz, npml):
@@ -214,5 +232,9 @@ class NumPyFDTD_FaceCPML(NumPyFDTD):
             cz = self._cz_e[k_sl].reshape(1, 1, -1)
             self._psi_Ex_z[:, :, s_sl] = bz * self._psi_Ex_z[:, :, s_sl] + cz * dHy_dz[:, :, k_sl]
             self._psi_Ey_z[:, :, s_sl] = bz * self._psi_Ey_z[:, :, s_sl] + cz * dHx_dz[:, :, k_sl]
-            self.Ex[:, :, k_sl] += self._ce_x[:, :, k_sl] * (-self._psi_Ex_z[:, :, s_sl])
-            self.Ey[:, :, k_sl] += self._ce_y[:, :, k_sl] * self._psi_Ey_z[:, :, s_sl]
+            self.Ex[:, :, k_sl] += (self._ce_x[:, :, k_sl] * (-self._psi_Ex_z[:, :, s_sl])).astype(
+                self.dtype, copy=False
+            )
+            self.Ey[:, :, k_sl] += (self._ce_y[:, :, k_sl] * self._psi_Ey_z[:, :, s_sl]).astype(
+                self.dtype, copy=False
+            )

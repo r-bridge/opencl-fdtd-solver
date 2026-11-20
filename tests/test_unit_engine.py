@@ -26,8 +26,6 @@ EXPECTED_KERNELS = (
     "update_E_pml",
     "add_source_Ex",
     "add_source_Jx",
-    "accumulate_dft",
-    "accumulate_dft_face",
     "accumulate_dft_faces_fused",
     "dft_rel_change_partial",
     "farfield_accumulate_nl",
@@ -250,7 +248,7 @@ class TestOpenCLEngineBasics(unittest.TestCase):
 
         ctx = mock.Mock()
         ctx.devices = [tiny]
-        queue = mock.Mock()
+        queue = mock.Mock(context=ctx, device=tiny)
 
         with self.assertRaises(MemoryError) as cm:
             OpenCLFDTD((400, 400, 400), 1e-3, npml=20, ctx=ctx, queue=queue)
@@ -304,7 +302,7 @@ class TestOpenCLEngineBasics(unittest.TestCase):
 
         fake_ctx = mock.Mock()
         fake_ctx.devices = [gpu]
-        fake_queue = mock.Mock()
+        fake_queue = mock.Mock(context=fake_ctx, device=gpu)
 
         with self.assertRaises(ValueError) as cm:
             OpenCLFDTD(

@@ -15,7 +15,7 @@ It is intentionally a **kernel**, not a full CAD/EM suite:
 | Included | Not included |
 |---|---|
 | Uniform cubic Yee grid | Non-uniform / unstructured meshes |
-| Nondispersive scalar εᵣ, optional ohmic σ on OpenCL | Lorentz / Debye / Drude media |
+| Nondispersive isotropic or diagonal-anisotropic εᵣ, optional ohmic σ and cell-centered PEC | Lorentz / Debye / Drude media |
 | Vacuum μ = μ₀ | Magnetic materials (μᵣ ≠ 1) |
 | Soft Ex / SI Jx sheet sources | Built-in antennas, PEC/PMC, periodic BCs |
 | Closed-box Huygens near-to-far | Full geometric optics / high-frequency asymptotics |
@@ -60,8 +60,8 @@ In vacuum or nondispersive dielectric with **μ = μ₀** and no free charges:
 \nabla\times\mathbf{H} = \varepsilon_0\varepsilon_r\,\partial_t\mathbf{E} + \sigma\mathbf{E} + \mathbf{J}.
 \]
 
-The OpenCL engine supports scalar, frequency-independent **ohmic conductivity**
-σ. The NumPy reference is lossless (σ=0). Neither supports magnetic contrast or
+Both the OpenCL and NumPy engines support scalar, frequency-independent **ohmic conductivity**
+σ and cell-centered PEC masks. Neither supports magnetic contrast or
 dispersive polarization models.
 
 ---
@@ -150,6 +150,28 @@ this relation and decreasing phase-velocity error on grid refinement.
 - Both are averaged onto Yee edges and converted to the trapezoidal-loss
   coefficients \(C_a,C_b\) above.
 - Default: vacuum \(\varepsilon_r=1,\sigma=0\).
+- A 3-tuple \((\varepsilon_x,\varepsilon_y,\varepsilon_z)\) of such arrays gives a
+  diagonal anisotropic medium: each component is averaged onto the E-edges of
+  its own direction.
+
+**Biaxial media and the PML.** A medium with three distinct diagonal
+components has a slowness surface with conical points, in the plane normal to
+the axis of the intermediate component. Near them there are plane waves whose
+phase and group velocities have opposite signs along that axis. A PML normal
+to that axis damps a wave according to the sign of its phase velocity, so it
+amplifies those waves instead of absorbing them (the geometric stability
+condition of Bécache, Fauqueux and Joly). The solver's CPML is no exception:
+with \(\varepsilon=(6,2,1)\) filling a \(24^3\) grid with 6 PML cells, the field
+left after a short pulse grows about eightfold every 500 steps, whatever the
+value of \(\alpha_{\max}\) (§6). The other two PML directions, and isotropic
+or uniaxial media in any PML, are stable. `set_epsilon` therefore rejects a cell in the PML normal
+to axis \(a\) whose \(\varepsilon_a\) lies strictly between the other two
+components. Terminate a biaxial region before that PML, or continue it there
+with \(\varepsilon_a\) set equal to one of the other two components; either
+padding stayed stable in runs of 40 000 steps or more. The rule is geometric, so it also
+rejects weakly biaxial media such as \((3,2,1)\), which showed no growth in
+80 000 steps on a \(96^3\) grid: their PML is still not an absorber for the
+waves near the conical points.
 
 **Implications for reviewers**
 
@@ -168,14 +190,42 @@ Outer layers use **complex-frequency-shifted convolutional PML** with polynomial
 | Thickness | `npml` cells (constructor default **20**; validation cases often 4–12) |
 | Grading order \(m\) | 3 |
 | \(\sigma_{\max}\) | \(0.8\,(m+1)/(\eta_0\Delta\ell)\) |
-| \(\kappa_{\max}\) | 15 |
-| \(\alpha_{\max}\) | \(0.05/\eta_0\) at the vacuum interface, decaying toward the outer wall |
+| \(\kappa_{\max}\) | 5 |
+| \(\alpha_{\max}\) | \(0.05/(\eta_0\Delta\ell)\) at the vacuum interface, decaying toward the outer wall |
 
 Separate 1-D profiles are built for E-node and H-node locations (half-cell stagger). Auxiliary ψ fields implement the CFS convolution; the OpenCL engine stores them on **PML face slabs** only (not the full volume).
 
+**Long-wavelength limit of the CFS term.** \(\sigma_{\max}\) and
+\(\alpha_{\max}\) scale as \(1/\Delta\ell\), which makes the layer's behaviour
+depend only on the number of cells per wavelength, on any grid. The frequency shift \(\alpha\) improves the
+absorption of evanescent and late-time fields, and it turns the layer from an
+absorber into a real coordinate stretch below the corner frequency
+\(f_c=\alpha_{\max}/(2\pi\varepsilon_0)\). With the value above the corner sits
+at
+
+\[
+\lambda_c = \frac{2\pi\,\Delta\ell}{0.05} \approx 126\ \text{cells},
+\]
+
+so waves resolved with more than about 126 cells per wavelength are absorbed
+progressively less. Measured normal-incidence reflection in dB (plane wave,
+Gaussian envelope of 1.5 periods, FP64) against cells per vacuum wavelength:
+
+| `npml` | 10 | 20 | 40 | 80 | 126 | 250 | 500 | 1000 |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 8 | −48 | −80 | −87 | −86 | −82 | −63 | −42 | −26 |
+| 12 | −70 | −95 | −96 | −98 | −99 | −93 | −63 | −39 |
+| 20 | −103 | −108 | −110 | −111 | −113 | −116 | −103 | −65 |
+
+With \(\alpha=0\) the same layers stay at −86, −97 and −110 dB from 40 cells
+per wavelength upward. A run whose spectrum reaches beyond a few hundred
+cells per wavelength (an electrically small structure on a fine grid, or a
+pulse with strong low-frequency content) therefore needs the default
+thickness of 20 cells or more, not the thin layers of the validation cases.
+
 **What to expect**
 
-- Normal-incidence reflection is gated analytically below about **−25 dB** in the unit suite.
+- Normal-incidence reflection is gated analytically below **−50 dB** on both `−z` and `+z` faces (with `< 3 dB` low/high symmetry, scale invariance across 6 orders of magnitude in `dl`, monotonic convergence with `npml`, steered 45° oblique single-face absorption `< −45 dB` front / `< −38 dB` back-wall path-matched at `npml = 10`, and 3-D enclosure reflection `< −35 dB` at `npml = 8`) in the unit suite.
 - Thin PML (e.g. 4 cells on tiny validation grids) is a compromise for CI cost, not a claim of ultra-low reflection for all angles/spectra.
 - Energy after the source turns off should decay; Meep-matched PML decay tests require late/peak Ex energy \(\lt 0.05\).
 
@@ -214,7 +264,7 @@ adds are immediate and, if applied before that update, undergo its decay.
 
 ## 8. Near-to-far transformation
 
-A closed rectangular **Huygens surface** is defined in physical metres and snapped to Yee indices. On each face:
+A closed rectangular **Huygens surface** is defined in physical metres and snapped to Yee indices: each face goes to the nearest grid node, and a face exactly half-way between two nodes goes to the higher one on both sides of the box, so a box spanning a whole number of cells keeps that extent. On each face:
 
 \[
 \mathbf{J}_s = \hat{n}\times\mathbf{H},\qquad
@@ -224,7 +274,7 @@ A closed rectangular **Huygens surface** is defined in physical metres and snapp
 Face DFT uses \(\int f(t)e^{+i\omega t}\,dt\). **H** carries the half-step
 phase \(e^{-i\omega\Delta t/2}\) so E and H are co-located in time for the
 integral. Radiation integrals \(\mathbf{N},\mathbf{L}\) of the currents above
-use phase \(e^{-ik\hat r\cdot\mathbf{r}'}\) and trapezoidal edge/corner weights.
+use phase \(e^{-ik\hat r\cdot\mathbf{r}'}\) and closed-box midpoint quadrature (exact \(\Delta\ell^2\) patches over `[i0..i1-1]`, `[j0..j1-1]`, `[k0..k1-1]` with uniform weight 1).
 
 Far fields with this Fourier convention (outgoing \(e^{+ikr}\)):
 
@@ -275,13 +325,20 @@ Implemented in `tests/test_analytic_validation.py`:
 
 - Yee dispersion relation (plane-wave phase).
 - Far-field angular shape for a compact \(E_x\) source \(\sim\cos^2\theta\) in the XZ cut, plus a strict endfire null-depth gate.
-- CPML normal-incidence reflection bound (\(\lesssim -25\,\mathrm{dB}\)).
+- Exact SI Hertzian dipole far-field complex vector \(\mathbf{E},\mathbf{H}\) (absolute amplitude, phase, and endfire null with zero fitted scaling), Huygens box-size/translation invariance, near-to-far Poynting power conservation, and OpenCL ↔ NumPy monitor parity.
+- CPML reflection bounds (`< -50 dB` normal on `-z`/`+z` with low/high symmetry, physical scale invariance across `dl`, thickness convergence at fixed vacuum gaps, steered 45° oblique single-face path-matched absorption `< -45 dB` front / `< -38 dB` back-wall, and 3-D enclosure reflection/symmetry).
 - Closed-box (npml=0) electromagnetic energy stability after the source is off.
 - Dielectric-sphere bistatic E-plane shape vs Bohren–Huffman Mie series (`tests/analytic_mie.py`; normalized pattern correlation, not absolute RCS).
 
 `tests/test_correctness_regressions.py` additionally checks conductive-source
 amplitudes, outward flux, one-sided Huygens radiation on all six faces,
 radial/translation phase, and CPU/GPU agreement relative to field magnitude.
+`tests/test_numerical_hardening.py` checks the extinction of an external
+source by the closed Huygens box, FP64 against FP32 accumulation, engine
+parity for lossy, PEC and anisotropic media, and the biaxial rule of §5:
+between steps 1500 and 3000 the medium kept out of the critical PML does not
+grow, and the rejected configuration, run with the check bypassed, grows more
+than tenfold.
 
 ### 10.1.1 Metallic mirror: absolute RCS
 
@@ -345,12 +402,12 @@ for every supported configuration or certification of a device design.
 
 Use this when deciding whether results are trustworthy for your problem.
 
-1. **Is my problem inside the model?** Scalar nondispersive ε, μ=μ₀, no PEC/periodic BCs, uniform Δℓ; FP32 enough or need `dtype=float64`?
+1. **Is my problem inside the model?** Isotropic or diagonal anisotropic nondispersive ε, optional ohmic σ / cell-centered `pec_mask`, μ=μ₀, no periodic BCs, uniform Δℓ; FP32 enough or need `dtype=float64`?
 2. **Resolution:** \(\Delta\ell\) small enough for the shortest wavelength *inside* the highest ε (rule of thumb: ≥10–20 cells/λ).
 3. **Courant:** leave at default \(0.99/\sqrt{3}\) unless you knowingly rematch any reference.
 4. **Materials:** supply a cell-wise εᵣ you trust (average subpixels yourself if needed).
 5. **Sources:** prefer SI `Jx` sheets trimmed out of PML; use rim taper when matching volume-restricted references.
-6. **PML:** `npml` thick enough for your spectrum and angles (default 20 is safer than the thin CI cases).
+6. **PML:** `npml` thick enough for your spectrum and angles (default 20 is safer than the thin CI cases); absorption falls for wavelengths beyond ~126 cells (§6), and a biaxial medium must stay out of the PML normal to its intermediate-ε axis (§5).
 7. **Near-to-far:** Huygens box in the near field but outside scatterers; interpret main lobe, not absolute null floors, on coarse grids.
 8. **Cross-check:** for a new configuration, compare a mid-plane cut or probe DFT against Meep (or the NumPy engine) before trusting far-field numbers.
 
@@ -361,7 +418,7 @@ Use this when deciding whether results are trustworthy for your problem.
 Prefer Meep or a commercial code if you need any of:
 
 - dispersive / magnetic media,
-- PEC, periodic, or symmetry boundaries,
+- periodic or symmetry boundaries (cell-centered `pec_mask` is supported via `set_epsilon`),
 - built-in geometry, subpixel averaging, or eigenmode ports,
 - certification of a specific fabricated device without your own meshing pipeline.
 
@@ -372,6 +429,7 @@ Prefer Meep or a commercial code if you need any of:
 - K. S. Yee, “Numerical solution of initial boundary value problems involving Maxwell’s equations in isotropic media,” *IEEE Trans. Antennas Propag.*, 1966.
 - A. Taflove & S. C. Hagness, *Computational Electrodynamics: The Finite-Difference Time-Domain Method*.
 - J. A. Roden & S. D. Gedney, “Convolution PML (CPML),” *Microwave Optical Technol. Lett.*, 2000.
+- E. Bécache, S. Fauqueux & P. Joly, “Stability of perfectly matched layers, group velocities and anisotropic waves,” *J. Comput. Phys.*, 2003.
 - C. A. Balanis, *Antenna Theory* (far-field equivalence / N, L integrals).
 - Implementation heritage: [gprMax](https://github.com/gprMax/gprMax) Yee/CPML formulations (University of Edinburgh), stripped to this Python/OpenCL kernel.
 - External cross-check: [Meep](https://meep.readthedocs.io/).
