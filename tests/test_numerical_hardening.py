@@ -19,6 +19,8 @@ from opencl_fdtd_solver import (
     OpenCLFDTD,
     OpenCLNear2FarMonitor,
 )
+from opencl_fdtd_solver.constants import ETA0
+from opencl_fdtd_solver.monitors import Near2FarBase
 
 
 class TestClosedBoxExtinctionTheorem(unittest.TestCase):
@@ -121,9 +123,15 @@ class TestAccumFp64AndFetchEdges(unittest.TestCase):
         sim_auto.run(60)
         sim_fp32_acc.run(60)
 
-        eh1 = m1.get_farfield((0.024, 0.024, 10.0))
-        eh2 = m2.get_farfield((0.024, 0.024, 10.0))
-        np.testing.assert_allclose(eh1, eh2, rtol=1e-4, atol=1e-12)
+        # Compare against the peak, with H in E units: these fields are ~1e-14,
+        # so an absolute tolerance would accept anything. At 1 m range the FP32
+        # phase k*r is good to ~1e-5, well inside the gate.
+        scale = np.array([1, 1, 1, ETA0, ETA0, ETA0])
+        eh1 = m1.get_farfield((0.024, 0.024, 1.0)) * scale
+        eh2 = m2.get_farfield((0.024, 0.024, 1.0)) * scale
+        peak = float(np.max(np.abs(eh2)))
+        self.assertGreater(peak, 0.0)
+        self.assertLess(float(np.max(np.abs(eh1 - eh2))) / peak, 1e-4)
 
     def test_accum_fp64_auto_falls_back_on_fp32_only_device(self):
         dev = mock.Mock()
@@ -211,6 +219,57 @@ class TestAccumFp64AndFetchEdges(unittest.TestCase):
         # Edge (ix0, iy0:iy1, iz0) belongs to x0 (tangential for Ez) and z0 (normal=0).
         edge_vals = mon.Ez_dft[mon.ix0, mon.iy0 : mon.iy1, mon.iz0]
         np.testing.assert_allclose(edge_vals, 1.0 + 2.0j)
+
+    def test_fetch_dft_fields_host_farfield_keeps_every_face_sample(self):
+        """Distinct samples on every face: the host integral must use all of them.
+
+        Along the three box edges through the low corner two faces share a
+        cell index, so a volume cannot hold both samples; the host path
+        integrates the face packs instead.
+        """
+        sim = OpenCLFDTD((20, 22, 24), 1e-3, npml=3, dtype=np.float32)
+        ctr, size, freq = (0.010, 0.011, 0.012), (0.008, 0.010, 0.006), 7e9
+        gpu = OpenCLNear2FarMonitor(sim, ctr, size, freq)
+        cpu = NumPyNear2FarMonitor(sim, ctr, size, freq)
+        rng = np.random.default_rng(11)
+        uploaded = {}
+        for name in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
+            data = rng.normal(size=gpu.n_face_samples) + 1j * rng.normal(size=gpu.n_face_samples)
+            data = data.astype(sim.accreal_complex_dtype)
+            if name[0] == "H":
+                data /= ETA0
+            uploaded[name] = data
+            cl.enqueue_copy(sim.queue, getattr(gpu, name + "_dft_buf"), data)
+            getattr(cpu, name + "_dft_f")[:] = data
+        sim.queue.finish()
+
+        with self.assertRaises(RuntimeError):
+            Near2FarBase.get_farfield(gpu, (0.0, 0.0, 1.0))
+        faces = gpu.fetch_dft_fields()
+        for name, data in uploaded.items():
+            np.testing.assert_array_equal(faces[name], data)
+            np.testing.assert_array_equal(getattr(gpu, name + "_dft_f"), data)
+
+        scale = np.array([1, 1, 1, ETA0, ETA0, ETA0])
+        for obs in ((0.0, 0.0, 1.0), (1.0, 0.0, 0.0), (0.0, -1.0, 0.0), (0.3, -0.4, 0.86)):
+            with self.subTest(obs=obs):
+                host = Near2FarBase.get_farfield(gpu, obs) * scale
+                peak = float(np.max(np.abs(host)))
+                self.assertGreater(peak, 0.0)
+                device = gpu.get_farfield(obs) * scale
+                reference = cpu.get_farfield(obs) * scale
+                self.assertLess(float(np.max(np.abs(host - device))) / peak, 2e-5)
+                self.assertLess(float(np.max(np.abs(host - reference))) / peak, 1e-12)
+
+        # Volumes: face interiors are exact; on a shared low-corner edge the
+        # later face (z after x) wins, as documented.
+        x0 = uploaded["Ey"][: gpu._face_counts[0]].reshape(gpu.nyf, gpu.nzf)
+        z0_start = gpu._face_offsets[4]
+        z0 = uploaded["Ey"][z0_start : z0_start + gpu._face_counts[4]].reshape(gpu.nxf, gpu.nyf)
+        np.testing.assert_array_equal(
+            gpu.Ey_dft[gpu.ix0, gpu.iy0 : gpu.iy1, gpu.iz0 + 1 : gpu.iz1], x0[:, 1:]
+        )
+        np.testing.assert_array_equal(gpu.Ey_dft[gpu.ix0, gpu.iy0 : gpu.iy1, gpu.iz0], z0[0, :])
 
     def test_farfield_polar_xz_centered_on_box(self):
         sim = OpenCLFDTD((24, 24, 24), 2e-3, npml=4, dtype=np.float32)
@@ -332,10 +391,107 @@ class TestAnisotropicLossyPecAndMixedPsiParity(unittest.TestCase):
         self.assertGreater(float(np.max(np.abs(ex_ayz - ex_iso))), 1e-3)
 
         # Validation rejects wrong tuple length or < 1 component.
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "must have 3 components"):
             cl_iso.set_epsilon((eps_vac, eps_vac))
         with self.assertRaises(ValueError):
             cl_iso.set_epsilon((eps_vac, np.full(shape, 0.5, dtype=np.float32), eps_vac))
+
+    def test_tuple_of_wrong_shaped_planes_reports_the_shape(self):
+        shape = (6, 4, 5)
+        sim = NumPyFDTD(shape, 1e-3, npml=0)
+        swapped = tuple(np.ones((5, 4)) for _ in range(6))
+        too_few = tuple(np.ones((4, 5)) for _ in range(5))
+        for planes, got in ((swapped, (6, 5, 4)), (too_few, (5, 4, 5))):
+            with self.subTest(got=got):
+                with self.assertRaises(ValueError) as cm:
+                    sim.set_epsilon(planes)
+                self.assertIn(
+                    f"Epsilon shape mismatch: expected {shape}, got {got}", str(cm.exception)
+                )
+
+
+class TestBiaxialMediumAndPml(unittest.TestCase):
+    """A biaxial medium must not reach the PML normal to its intermediate-ε axis."""
+
+    SHAPE = (24, 24, 24)
+    NPML = 6
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ.setdefault("PYOPENCL_CTX", "0")
+
+    def _components(self, values, vacuum_pml_axes=""):
+        comps = [np.full(self.SHAPE, v, dtype=np.float32) for v in values]
+        for name in vacuum_pml_axes:
+            axis = "xyz".index(name)
+            for slab in (slice(0, self.NPML), slice(self.SHAPE[axis] - self.NPML, None)):
+                index = tuple(slab if a == axis else slice(None) for a in range(3))
+                for comp in comps:
+                    comp[index] = 1.0
+        return tuple(comps)
+
+    def test_biaxial_in_intermediate_axis_pml_is_rejected(self):
+        for cls in (OpenCLFDTD, NumPyFDTD, NumPyFDTD_FaceCPML):
+            sim = cls(self.SHAPE, 1e-3, npml=self.NPML)
+            # The intermediate component names the PML that must stay clear.
+            for values, axis in (((2, 6, 1), "x"), ((6, 2, 1), "y"), ((6, 1, 2), "z")):
+                others = "xyz".replace(axis, "")
+                with self.subTest(cls=cls.__name__, values=values):
+                    with self.assertRaisesRegex(ValueError, f"{axis}-normal PML"):
+                        sim.set_epsilon(self._components(values))
+                    with self.assertRaisesRegex(ValueError, f"{axis}-normal PML"):
+                        sim.set_epsilon(self._components(values, vacuum_pml_axes=others))
+                    sim.set_epsilon(self._components(values, vacuum_pml_axes=axis))
+
+    def test_uniaxial_isotropic_and_pml_free_biaxial_are_accepted(self):
+        for cls in (OpenCLFDTD, NumPyFDTD):
+            with self.subTest(cls=cls.__name__):
+                sim = cls(self.SHAPE, 1e-3, npml=self.NPML)
+                for values in ((6, 2, 2), (6, 6, 1), (1, 6, 6), (3, 3, 3)):
+                    sim.set_epsilon(self._components(values))
+                # Integer and bool component arrays go through the same check.
+                sim.set_epsilon(tuple(np.full(self.SHAPE, v, dtype=np.int64) for v in (4, 1, 1)))
+                sim.set_epsilon(tuple(np.ones(self.SHAPE, dtype=bool) for _ in range(3)))
+                no_pml = cls(self.SHAPE, 1e-3, npml=0)
+                no_pml.set_epsilon(self._components((6, 2, 1)))
+
+    def _field_growth(self, sim):
+        """max|Ex| at step 3000 over max|Ex| at step 1500, long after the source ended."""
+        centre = self.SHAPE[0] // 2
+
+        def src(f):
+            # Odd pulse (zero net charge) that ends at step 80.
+            s = f.step_num - 40
+            if abs(s) <= 40:
+                amp = float(s / 10 * np.exp(-0.5 * (s / 10) ** 2))
+                f.add_source_Jx(
+                    centre, amp, i0=centre - 1, i1=centre + 1, j0=centre - 2, j1=centre + 1
+                )
+
+        sim.add_source(src)
+        sim.run(1500)
+        mid = float(np.max(np.abs(sim.Ex)))
+        sim.run(1500)
+        late = float(np.max(np.abs(sim.Ex)))
+        self.assertGreater(mid, 0.0)
+        return late / mid
+
+    def test_biaxial_medium_clear_of_critical_pml_stays_stable(self):
+        # Biaxial up to the x and z PMLs, vacuum only inside the y PML.
+        sim = OpenCLFDTD(self.SHAPE, 1e-3, npml=self.NPML)
+        sim.set_epsilon(self._components((6, 2, 1), vacuum_pml_axes="y"))
+        growth = self._field_growth(sim)
+        self.assertLess(growth, 2.0, f"field grew {growth:.2e}-fold after the source ended")
+
+    def test_rejected_configuration_really_diverges(self):
+        # With the check bypassed the same run grows about eightfold every 500
+        # steps (measured growth here: ~470). This is what the rejection
+        # protects against, and it shows that the run above is long enough to
+        # notice an instability.
+        sim = OpenCLFDTD(self.SHAPE, 1e-3, npml=self.NPML)
+        with mock.patch("opencl_fdtd_solver._validation._reject_biaxial_in_pml"):
+            sim.set_epsilon(self._components((6, 2, 1)))
+        self.assertGreater(self._field_growth(sim), 10.0)
 
 
 if __name__ == "__main__":

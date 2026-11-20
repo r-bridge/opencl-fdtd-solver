@@ -44,6 +44,45 @@ class TestNear2FarBaseErrors(unittest.TestCase):
             base.get_farfield((0.0, 0.0, 1.0))
 
 
+class TestNear2FarBoxSnapping(unittest.TestCase):
+    class _Grid:
+        Nx = Ny = Nz = 24
+        dl = 1e-3
+
+    def _x_range(self, centre_mm, size_mm):
+        box = Near2FarBase(
+            self._Grid(), (centre_mm * 1e-3, 12e-3, 12e-3), (size_mm * 1e-3, 4e-3, 4e-3), 1e9
+        )
+        return box.ix0, box.ix1
+
+    def test_whole_cell_box_keeps_its_extent_for_any_centre(self):
+        # Faces on half cells: the extent must not depend on the centre's parity.
+        for size in (1, 3, 5):
+            for centre in (7, 8, 9, 10):
+                with self.subTest(size=size, centre=centre):
+                    lo, hi = self._x_range(centre, size)
+                    self.assertEqual(hi - lo, size)
+        for size in (2, 4):
+            for centre in (7.5, 8.5, 9.5):
+                with self.subTest(size=size, centre=centre):
+                    lo, hi = self._x_range(centre, size)
+                    self.assertEqual(hi - lo, size)
+
+    def test_half_cell_faces_snap_to_the_higher_node(self):
+        self.assertEqual(self._x_range(8, 3), (7, 10))
+        self.assertEqual(self._x_range(9, 3), (8, 11))
+        self.assertEqual(self._x_range(8, 1), (8, 9))
+
+    def test_faces_on_nodes_and_off_grid_positions_snap_to_nearest(self):
+        self.assertEqual(self._x_range(8, 4), (6, 10))
+        self.assertEqual(self._x_range(8.1, 3.4), (6, 10))
+        self.assertEqual(self._x_range(8.4, 3.4), (7, 10))
+
+    def test_box_thinner_than_half_a_cell_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "degenerate"):
+            self._x_range(8.2, 0.2)
+
+
 class TestOpenCLNear2FarMonitor(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -76,6 +115,13 @@ class TestOpenCLNear2FarMonitor(unittest.TestCase):
         eh1 = mon.get_farfields(np.array([0.0, 0.0, 10.0], dtype=np.float32))
         self.assertEqual(eh1.shape, (1, 6))
 
+        # No points, as a list or as an empty (0, 3) array.
+        for empty in ([], np.empty((0, 3))):
+            self.assertEqual(mon.get_farfields(empty).shape, (0, 6))
+        for bad in ([1.0, 2.0], np.ones((2, 3, 3))):
+            with self.assertRaises(ValueError):
+                mon.get_farfields(bad)
+
     def test_farfield_polar_rejects_nonpositive_distance(self):
         _, mon = self._small_run(n_steps=10)
         with self.assertRaises(ValueError):
@@ -92,20 +138,24 @@ class TestOpenCLNear2FarMonitor(unittest.TestCase):
         # Normal-only slots on x-faces stay zero (tangential-only DFT).
         self.assertEqual(mon.Ex_dft.dtype, fdtd.accreal_complex_dtype)
 
-    def test_phase_recurrence_stable_across_steps(self):
+    def test_phase_follows_solver_time_not_call_history(self):
         shape = (20, 20, 20)
         fdtd = OpenCLFDTD(shape, 1e-3, npml=3)
         mon = OpenCLNear2FarMonitor(fdtd, (0.01, 0.01, 0.01), (0.008, 0.008, 0.008), 3e9)
         self.assertIsNone(mon._phase)
         fdtd.run(5)
-        self.assertIsNotNone(mon._phase)
-        phase_after = complex(mon._phase)
-        expected = np.exp(1j * mon.omega * fdtd.t) * fdtd.dt
-        self.assertAlmostEqual(abs(phase_after), abs(expected), places=5)
+        step_phase = mon.omega * fdtd.dt
+        # After n steps the DFT weight is dt * exp(j ω n dt).
+        self.assertAlmostEqual(abs(mon._phase), fdtd.dt, delta=1e-12 * fdtd.dt)
         self.assertAlmostEqual(
-            float(np.angle(phase_after / expected)),
-            0.0,
-            places=4,
+            float(np.angle(mon._phase * np.exp(-5j * step_phase))), 0.0, places=12
+        )
+        # Jump the clock: the next weight must come from the new time alone.
+        # A running product phase *= exp(j ω dt) would give 6 steps instead.
+        fdtd.t = 1000.25 * fdtd.dt
+        mon(fdtd)
+        self.assertAlmostEqual(
+            float(np.angle(mon._phase * np.exp(-1000.25j * step_phase))), 0.0, places=9
         )
 
     def test_get_farfields_tiny_box_local_reduce(self):

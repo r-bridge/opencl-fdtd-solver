@@ -82,10 +82,14 @@ class NumPyFDTD(SourceMonitorMixin):
         four cells that own it (``materials.yee_edge_eps``). Relative
         permittivity must be finite and at least 1 (nondispersive dielectric;
         the fixed vacuum-based timestep would leave the 3-D CFL limit below
-        0.9801 anyway); conductivity must be finite and nonnegative.
+        0.9801 anyway); conductivity must be finite and nonnegative. As in
+        ``OpenCLFDTD``, a biaxial medium must not reach the PML normal to the
+        axis of its intermediate component (``ValueError``).
         """
         expected = (self.Nx, self.Ny, self.Nz)
-        eps_array, sigma_array = validate_material_arrays(eps_array, sigma_array, expected)
+        eps_array, sigma_array = validate_material_arrays(
+            eps_array, sigma_array, expected, npml=self.npml
+        )
         if pec_mask is not None:
             pec_mask = np.asarray(pec_mask, dtype=bool)
             if pec_mask.shape != expected:

@@ -300,8 +300,12 @@ class TestAnalyticHuygensEquivalence(unittest.TestCase):
             f"P_far ({p_far:.4e}) vs P_analytic ({p_ana:.4e}) differs by > 2%",
         )
 
-        # 6. OpenCL vs NumPy monitor parity on full complex E, H.
-        np.testing.assert_allclose(eh_a, eh_np, rtol=1e-4, atol=1e-18)
+        # 6. OpenCL vs NumPy monitor parity on full complex E, H. The floor is
+        # relative to the peak (H in E units): components in a pattern null are
+        # pure round-off when the device accumulates in FP32.
+        scale = np.array([1, 1, 1, ETA0, ETA0, ETA0])
+        peak = float(np.max(np.abs(eh_np * scale)))
+        np.testing.assert_allclose(eh_a * scale, eh_np * scale, rtol=1e-4, atol=1e-6 * peak)
 
 
 class TestAnalyticDispersion(unittest.TestCase):
@@ -425,7 +429,7 @@ class TestPmlReflection(unittest.TestCase):
         r_db = float(20.0 * np.log10(max(e_ref / e_inc, 1e-30)))
         return r_db, p_long
 
-    def test_normal_incidence_reflection_below_minus_25db(self):
+    def test_normal_incidence_reflection_below_minus_50db(self):
         """Short domain (PML near probe) minus long reference ≈ reflected field.
 
         Pre-#49 CPML (weak σ, κ≡1, no stagger) measured ~−4 dB on this setup.

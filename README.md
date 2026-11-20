@@ -21,7 +21,7 @@ The mathematical formulations for the Yee-grid field updates and the Convolution
 *   **FP32 / FP64:** Same kernel sources; `OpenCLFDTD(..., dtype=np.float64)` when the device has `cl_khr_fp64` (expect ~2× cost from bandwidth). No separate CUDA engine.
 *   **Pluggable Monitors:** Supports host-side NumPy monitors and GPU-side OpenCL monitors for zero-copy DFT accumulation.
 *   **NumPy Fallback:** Includes a pure NumPy CPU reference implementation (`NumPyFDTD`) for testing, fallback, and benchmarking.
-*   **Cell-wise materials:** Nondispersive scalar εᵣ and optional ohmic conductivity on OpenCL via `set_epsilon(eps_array, sigma_array=None)`. Subpixel averaging / geometry meshing is left to the caller (see §6).
+*   **Cell-wise materials:** Nondispersive εᵣ (isotropic, or diagonal anisotropic as an `(eps_x, eps_y, eps_z)` tuple), optional ohmic conductivity and perfect-conductor cells on the OpenCL and NumPy engines via `set_epsilon(eps_array, sigma_array=None, pec_mask=None)`. Subpixel averaging / geometry meshing is left to the caller (see §6).
 *   **Dependency-Free:** Pure Python package with minimal requirements (no C compiler or toolchains required at install time).
 
 ---
@@ -174,7 +174,7 @@ This package is a **2nd-order Yee + CPML kernel**. For nondispersive scalar-ε p
 
 **When MEEP (or another full-featured solver) is usually ahead in practice:** dispersive / magnetic media, periodic/symmetry BCs, or any workflow that relies on a built-in geometry stack you do not provide yourself. (This solver supports diagonal anisotropic εᵣ, ohmic conductivity, PEC cell masks, and FP64 via `dtype=np.float64` when the device allows it — see [`docs/API.md`](docs/API.md).)
 
-**Subpixel averaging is intentionally out of scope.** The solver only accepts a cell-wise scalar εᵣ via `set_epsilon`; geometry sampling and effective-medium construction belong in the application layer. Typical choices include ~4³ subvoxels per Yee cell. At least two approaches fit this design:
+**Subpixel averaging is intentionally out of scope.** The solver only accepts cell-wise εᵣ (isotropic or diagonal anisotropic) via `set_epsilon`; geometry sampling and effective-medium construction belong in the application layer. Typical choices include ~4³ subvoxels per Yee cell. At least two approaches fit this design:
 
 1. **Object definitions as OpenCL kernels**, with subvoxel sampling / averaging also performed in OpenCL.
 2. **GPU-accelerated STL tiled rendering** with averaging into the Yee ε grid.

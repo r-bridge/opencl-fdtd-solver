@@ -243,6 +243,13 @@ class OpenCLFDTD(SourceMonitorMixin):
         limit below 0.9801 anyway). Conductivity must be finite and
         nonnegative.
 
+        A biaxial medium (three distinct components) must not reach the PML
+        normal to the axis of its intermediate component: the CPML amplifies
+        instead of absorbing there, so such input raises ``ValueError``.
+        Inside that PML make the normal component equal to one of the other
+        two (isotropic or uniaxial padding). Isotropic and uniaxial media,
+        and the other two PML directions, are unrestricted.
+
         ``sigma_array=None`` (default) is the old lossless path: ``ca=1``,
         ``ce = dt/(ε₀ εᵣ)`` exactly as before. Pass ``sigma_array`` (same
         shape as ``eps_array``, S/m) to add ohmic loss — see
@@ -258,7 +265,9 @@ class OpenCLFDTD(SourceMonitorMixin):
         see ``materials.yee_edge_pec``.
         """
         expected = (self.Nx, self.Ny, self.Nz)
-        eps_array, sigma_array = validate_material_arrays(eps_array, sigma_array, expected)
+        eps_array, sigma_array = validate_material_arrays(
+            eps_array, sigma_array, expected, npml=self.npml
+        )
         if pec_mask is not None:
             pec_mask = np.asarray(pec_mask, dtype=bool)
             if pec_mask.shape != expected:
